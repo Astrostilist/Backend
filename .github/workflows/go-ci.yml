@@ -1,6 +1,10 @@
 name: Go CI
 
 on:
+  push:
+    branches-ignore:
+      - 'main'
+      - 'develop'
   pull_request:
     branches: [ main, develop ]
 
@@ -59,10 +63,3 @@ jobs:
       - name: Build application
         run: |
           make build
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: astro-backend-binary
-          path: bin/
-          retention-days: 7

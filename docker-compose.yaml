@@ -44,5 +44,22 @@ services:
       - "14268:14268"
     restart: unless-stopped
 
+  nats:
+    image: nats:2.10-alpine
+    command: [ "-c", "/etc/nats/nats.conf" ]
+    volumes:
+      - nats-data:/data
+      - ./docker/nats/nats.conf:/etc/nats/nats.conf:ro
+    expose:
+      - 4222
+      - 8222
+    healthcheck:
+      test: [ "CMD", "nats-server", "--help" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  nats-data:
