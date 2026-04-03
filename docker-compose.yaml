@@ -36,19 +36,20 @@ services:
     restart: unless-stopped
 
   nats:
-    image: nats:2.10-alpine
-    command: [ "-c", "/etc/nats/nats.conf" ]
+    image: nats:alpine
+    command: ["-js", "-c", "/etc/nats/nats-server.conf"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
     volumes:
       - nats-data:/data
-      - ./docker/nats/nats.conf:/etc/nats/nats.conf:ro
-    expose:
-      - 4222
-      - 8222
+      - ./docker/nats/nats-server.conf:/etc/nats/nats-server.conf:ro
     healthcheck:
-      test: [ "CMD", "nats-server", "--help" ]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz?js-enabled-only=true >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     restart: unless-stopped
 
 volumes:
