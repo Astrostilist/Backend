@@ -10,8 +10,7 @@ import (
 )
 
 type Config struct {
-	MemcachedHost   string
-	JaegerEndpoint  string
+	JaegerEndpoint    string
 	JaegerServiceName string
 
 	// Database
@@ -43,9 +42,8 @@ func Load() *Config {
 	}
 
 	return &Config{
-		MemcachedHost:   getEnv("MEMCACHED_HOST", "localhost:11211"),
-		JaegerEndpoint:  getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
-		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
+        JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
+        JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
 
         DBHost:            getEnv("DB_HOST", "localhost"),
         DBPort:            getEnv("DB_PORT", "5432"),
