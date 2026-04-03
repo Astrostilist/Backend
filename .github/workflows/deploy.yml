@@ -1,0 +1,118 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    branches:
+      - main
+    types:
+      - completed
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    name: deploy
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release revision
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Prepare image metadata
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          IMAGE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          image_name="ghcr.io/${REPOSITORY,,}"
+          echo "name=${image_name}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=sha-${IMAGE_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          pull: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.sha_tag }}
+            ${{ steps.image.outputs.name }}:main
+
+      - name: Render deployment environment
+        env:
+          APP_IMAGE: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.sha_tag }}
+          CADDY_DOMAIN_NAME: ${{ vars.CADDY_DOMAIN_NAME }}
+          CADDY_LETSENCRYPT_EMAIL: ${{ vars.CADDY_LETSENCRYPT_EMAIL }}
+          CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          umask 077
+          cat > .env <<EOF
+          APP_IMAGE=${APP_IMAGE}
+          CADDY_DOMAIN_NAME=${CADDY_DOMAIN_NAME}
+          CADDY_LETSENCRYPT_EMAIL=${CADDY_LETSENCRYPT_EMAIL}
+          CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+          JAEGER_ENDPOINT=http://jaeger:14268/api/traces
+          JAEGER_SERVICE_NAME=go-api-backend
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_DB=astrobackend
+          DB_HOST=postgres
+          DB_PORT=5432
+          DB_USER=postgres
+          DB_PASSWORD=${DB_PASSWORD}
+          DB_NAME=astrobackend
+          DB_SSL_MODE=disable
+          DB_MAX_CONNS=50
+          DB_MIN_CONNS=20
+          DB_MAX_CONN_LIFETIME=1h
+          DB_MAX_CONN_IDLE_TIME=30m
+          DB_HEALTH_CHECK_PERIOD=1m
+          NATS_HOST=nats
+          NATS_PORT=4222
+          NATS_CLUSTER_ID=test-cluster
+          NATS_CLIENT_ID=astro-backend
+          EOF
+
+      - name: Copy deployment bundle to host
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ vars.SSH_DEPLOY_HOST }}
+          username: ${{ secrets.SSH_DEPLOY_USER }}
+          key: ${{ secrets.SSH_DEPLOY_KEY }}
+          source: "."
+          target: "backend"
+          rm: true
+
+      - name: Pull and restart production stack
+        uses: appleboy/ssh-action@v1
+        env:
+          REGISTRY_HOST: ghcr.io
+          REGISTRY_USERNAME: ${{ github.repository_owner }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        with:
+          host: ${{ vars.SSH_DEPLOY_HOST }}
+          username: ${{ secrets.SSH_DEPLOY_USER }}
+          key: ${{ secrets.SSH_DEPLOY_KEY }}
+          envs: REGISTRY_HOST,REGISTRY_USERNAME,REGISTRY_TOKEN
+          script: |
+            set -euo pipefail
+            mkdir -p ~/backend ~/frontend
+            cd ~/backend
+            printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin >/dev/null
+            trap 'docker logout "$REGISTRY_HOST" >/dev/null 2>&1 || true' EXIT
+            bash ./docker/deploy.sh

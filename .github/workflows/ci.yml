@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+          args: --timeout=5m
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests with race detector and coverage
+        run: go test ./... -race -cover
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    needs:
+      - test
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+
+      - name: Build Docker image
+        run: docker build --pull --tag astro-backend:${{ github.sha }} .
