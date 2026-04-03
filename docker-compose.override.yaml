@@ -1,15 +1,11 @@
 services:
-  db:
+  postgres:
     ports:
       - "5432:5432"
 
   app:
     ports:
       - "8080:8080"
-
-  memcached:
-    ports:
-    - "11211:11211"
 
   jaeger:
     ports:
