@@ -1,18 +1,24 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
-	"context"
-    "os"
-    "os/signal"
-    "syscall"
 
-	"github.com/joho/godotenv"
-	"astroapi/internal/handlers"
-    "astroapi/internal/database"
 	"astroapi/config"
+	"astroapi/internal/database"
+	"astroapi/internal/handlers"
+	"astroapi/internal/logger"
+	astromidware "astroapi/internal/middleware"
+
+	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/middleware"
+	"github.com/joho/godotenv"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -21,56 +27,67 @@ func main() {
 		log.Println("Warning: .env file not found, using system environment variables")
 	}
 
-    cfg := config.Load()
+	cfg := config.Load()
+
+	// Инициализируем логгер
+	logger, err := logger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
+	if err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer logger.Sync()
 
 	// Инициализируем базу данных
 	if err := database.InitDB(cfg); err != nil {
-		log.Fatal("Failed to initialize database:", err)
+		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
 
 	defer func() {
-        if err := database.DB.Close(); err != nil {
-            log.Printf("Error closing database connection: %v", err)
-        }
-    }()
-
+		if err := database.DB.Close(); err != nil {
+			logger.Error("Error closing database connection", zap.Error(err))
+		}
+	}()
 
 	// Настраиваем маршруты
-	http.HandleFunc("/api/v1/", handlers.HelloWorldHandler)
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(astromidware.RequestLogger(logger))
+	r.Use(middleware.Recoverer)
 
-    // Создаем HTTP сервер с таймаутами
+	r.Get("/api/v1/", handlers.HelloWorldHandler)
+
+	// Создаем HTTP сервер с таймаутами
 	srv := &http.Server{
 		Addr:         ":8080",
-		Handler:      nil,
+		Handler:      r,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
-
 	// Запускаем сервер в горутине
 	go func() {
-		log.Printf("App starting on port 8080")
+		logger.Info("App starting on port 8080")
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal("Server failed to start:", err)
+			logger.Fatal("Server failed to start", zap.Error(err))
 		}
 	}()
 
 	// Ожидаем сигнал для graceful shutdown
-    quit := make(chan os.Signal, 1)
-    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-    <-quit
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 
-    log.Println("Shutting down server...")
+	logger.Info("Shutting down server...")
 
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-    if err := srv.Shutdown(ctx); err != nil {
-        log.Fatalf("Server forced to shutdown: %v", err)
-    }
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Fatal("Server forced to shutdown", zap.Error(err))
+		srv.Close()
+	}
 
-    log.Println("Server exited")
+	logger.Info("Server exited")
 
 }
