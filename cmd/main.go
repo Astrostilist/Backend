@@ -34,7 +34,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
-	defer logger.Sync()
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			log.Printf("Failed to sync logger: %v", err)
+		}
+	}()
 
 	// Инициализируем базу данных
 	if err := database.InitDB(cfg); err != nil {
@@ -85,7 +89,9 @@ func main() {
 
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Fatal("Server forced to shutdown", zap.Error(err))
-		srv.Close()
+		if closeErr := srv.Close(); closeErr != nil {
+			logger.Fatal("Server forced close error", zap.Error(closeErr))
+		}
 	}
 
 	logger.Info("Server exited")
