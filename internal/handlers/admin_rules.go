@@ -155,7 +155,9 @@ func (h *AdminRulesHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeAdminRuleRequest(r *http.Request) (adminRuleRequest, error) {
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close()
+	}()
 
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()

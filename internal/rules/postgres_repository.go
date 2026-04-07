@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -46,18 +47,17 @@ func (r *PostgresRepository) List(ctx context.Context, options ListOptions) (Lis
 	offsetArgIndex := len(queryArgs) + 2
 	queryArgs = append(queryArgs, options.Limit, options.Offset)
 
-	selectQuery := fmt.Sprintf(`
-		SELECT id, name, astro_condition, product_tags, priority, is_active, created_at, updated_at
-		FROM astro_rules%s
-		ORDER BY priority ASC, created_at DESC
-		LIMIT $%d OFFSET $%d
-	`, whereClause, limitArgIndex, offsetArgIndex)
+	selectQuery := buildListQuery(whereClause, limitArgIndex, offsetArgIndex)
 
 	rows, err := r.db.QueryContext(ctx, selectQuery, queryArgs...)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("list astro rules: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("failed to close astro rules rows: %v", closeErr)
+		}
+	}()
 
 	ruleItems := make([]Rule, 0)
 	for rows.Next() {
@@ -220,4 +220,20 @@ func normalizeQuery(conditions []string) string {
 		return ""
 	}
 	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+func buildListQuery(whereClause string, limitArgIndex int, offsetArgIndex int) string {
+	queryBuilder := strings.Builder{}
+	queryBuilder.WriteString(`
+		SELECT id, name, astro_condition, product_tags, priority, is_active, created_at, updated_at
+		FROM astro_rules`)
+	queryBuilder.WriteString(whereClause)
+	queryBuilder.WriteString(`
+		ORDER BY priority ASC, created_at DESC
+		LIMIT $`)
+	queryBuilder.WriteString(fmt.Sprintf("%d", limitArgIndex))
+	queryBuilder.WriteString(` OFFSET $`)
+	queryBuilder.WriteString(fmt.Sprintf("%d", offsetArgIndex))
+
+	return queryBuilder.String()
 }
