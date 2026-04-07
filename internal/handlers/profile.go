@@ -50,36 +50,41 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request) {
 	if validationErrors := req.Validate(); len(validationErrors) > 0 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"error":   "validation_failed",
 			"details": validationErrors,
-		})
-		return
-	}
+		}); err != nil {
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
+			return
+		}
 
-	// Генерация идентификатора запроса
-	requestID := uuid.New().String()
+		// Генерация идентификатора запроса
+		requestID := uuid.New().String()
 
-	// Отправка задачи в NATS JetStream
-	payload, err := json.Marshal(req)
-	if err != nil {
-		http.Error(w, `{"error": "failed to encode payload"}`, http.StatusInternalServerError)
-		return
-	}
-
-	// Вызываем метод Publish
-	if messaging.JS != nil {
-		_, err = messaging.JS.Publish(r.Context(), "astro.events.profile", payload)
+		// Отправка задачи в NATS JetStream
+		payload, err := json.Marshal(req)
 		if err != nil {
-			http.Error(w, `{"error": "failed to publish event to NATS"}`, http.StatusInternalServerError)
+			http.Error(w, `{"error": "failed to encode payload"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Вызываем метод Publish
+		if messaging.JS != nil {
+			_, err = messaging.JS.Publish(r.Context(), "astro.events.profile", payload)
+			if err != nil {
+				http.Error(w, `{"error": "failed to publish event to NATS"}`, http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Возврат успешного ответа
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		if err := json.NewEncoder(w).Encode(map[string]string{
+			"request_id": requestID,
+		}); err != nil {
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 			return
 		}
 	}
-
-	// Возврат успешного ответа
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]string{
-		"request_id": requestID,
-	})
 }
