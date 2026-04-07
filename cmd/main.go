@@ -1,18 +1,20 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
-	"context"
-    "os"
-    "os/signal"
-    "syscall"
+
+	"astroapi/config"
+	"astroapi/internal/database"
+	"astroapi/internal/handlers"
+	"astroapi/internal/rules"
 
 	"github.com/joho/godotenv"
-	"astroapi/internal/handlers"
-    "astroapi/internal/database"
-	"astroapi/config"
 )
 
 func main() {
@@ -21,7 +23,11 @@ func main() {
 		log.Println("Warning: .env file not found, using system environment variables")
 	}
 
-    cfg := config.Load()
+	cfg := config.Load()
+
+	if cfg.AdminToken == "" {
+		log.Println("Warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
+	}
 
 	// Инициализируем базу данных
 	if err := database.InitDB(cfg); err != nil {
@@ -29,24 +35,27 @@ func main() {
 	}
 
 	defer func() {
-        if err := database.DB.Close(); err != nil {
-            log.Printf("Error closing database connection: %v", err)
-        }
-    }()
+		if err := database.DB.Close(); err != nil {
+			log.Printf("Error closing database connection: %v", err)
+		}
+	}()
 
+	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
+	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
 
 	// Настраиваем маршруты
-	http.HandleFunc("/api/v1/", handlers.HelloWorldHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/", handlers.HelloWorldHandler)
+	handlers.RegisterAdminRulesRoutes(mux, cfg.AdminToken, adminRulesHandler)
 
-    // Создаем HTTP сервер с таймаутами
+	// Создаем HTTP сервер с таймаутами
 	srv := &http.Server{
 		Addr:         ":8080",
-		Handler:      nil,
+		Handler:      mux,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-
 
 	// Запускаем сервер в горутине
 	go func() {
@@ -58,19 +67,19 @@ func main() {
 	}()
 
 	// Ожидаем сигнал для graceful shutdown
-    quit := make(chan os.Signal, 1)
-    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-    <-quit
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 
-    log.Println("Shutting down server...")
+	log.Println("Shutting down server...")
 
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-    if err := srv.Shutdown(ctx); err != nil {
-        log.Fatalf("Server forced to shutdown: %v", err)
-    }
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
 
-    log.Println("Server exited")
+	log.Println("Server exited")
 
 }
