@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -15,9 +16,15 @@ import (
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 
+	natsadapter "astroapi/internal/nats"
+	natsinfra "astroapi/internal/repositories/nats"
+	"astroapi/internal/usecases"
+
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 	"github.com/joho/godotenv"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"go.uber.org/zap"
 )
 
@@ -39,6 +46,52 @@ func main() {
 			log.Printf("Failed to sync logger: %v", err)
 		}
 	}()
+
+	// Инициализируем NATS
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opts := []nats.Option{
+		nats.ReconnectWait(2 * time.Second),
+		nats.MaxReconnects(-1),
+		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
+			logger.Info("Disconnected from NATS", zap.Error(err))
+		}),
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			logger.Info("Reconnected to NATS", zap.String("url", nc.ConnectedUrl()))
+		}),
+		nats.ClosedHandler(func(nc *nats.Conn) {
+			logger.Info("NATS connection closed")
+		}),
+	}
+	natsurl := fmt.Sprintf("nats://%s:%s", cfg.NATSHost, cfg.NATSPort)
+	nc, err := nats.Connect(natsurl, opts...)
+	if err != nil {
+		logger.Fatal("Failed to connect to NATS", zap.Error(err))
+	}
+	defer func() {
+		err := nc.Drain()
+		if err != nil {
+			logger.Error("Failed to drain NATS connection", zap.Error(err))
+		}
+		nc.Close()
+	}()
+
+	js, err := jetstream.New(nc)
+	if err != nil {
+		logger.Fatal("Failed to create JetStream context", zap.Error(err))
+	}
+
+	// Dependency injection
+	streamRepo := natsinfra.NewJetStreamRepository(js)
+	streamUC := usecases.NewStreamUseCase(streamRepo)
+	streamManager := natsadapter.NewStreamManager(streamUC, logger)
+
+	// Инициализируем стримы
+	jsctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := streamManager.Initialize(jsctx); err != nil {
+		logger.Fatal("Failed to initialize streams", zap.Error(err))
+	}
 
 	// Инициализируем базу данных
 	if err := database.InitDB(cfg); err != nil {
@@ -84,10 +137,10 @@ func main() {
 
 	logger.Info("Shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	downctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(downctx); err != nil {
 		logger.Fatal("Server forced to shutdown", zap.Error(err))
 		if closeErr := srv.Close(); closeErr != nil {
 			logger.Fatal("Server forced close error", zap.Error(closeErr))
