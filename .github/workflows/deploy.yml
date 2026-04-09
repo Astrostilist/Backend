@@ -25,79 +25,28 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Resolve deployment target
-        id: target
+      - name: Validate deployment configuration
         env:
-          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          PROD_HOST: ${{ vars.SSH_DEPLOY_HOST_PROD }}
-          TEST_HOST: ${{ vars.SSH_DEPLOY_HOST_TEST }}
-          PROD_CADDY_DOMAIN_NAME: ${{ vars.CADDY_DOMAIN_NAME_PROD }}
-          TEST_CADDY_DOMAIN_NAME: ${{ vars.CADDY_DOMAIN_NAME_TEST }}
-          PROD_CADDY_LETSENCRYPT_EMAIL: ${{ vars.CADDY_LETSENCRYPT_EMAIL_PROD }}
-          TEST_CADDY_LETSENCRYPT_EMAIL: ${{ vars.CADDY_LETSENCRYPT_EMAIL_TEST }}
-          PROD_CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS_PROD }}
-          TEST_CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS_TEST }}
-        run: |
-          set -euo pipefail
-
-          case "$HEAD_BRANCH" in
-            main)
-              deploy_host="$PROD_HOST"
-              deploy_dir="backend"
-              compose_project_name="prod"
-              release_tag="main"
-              caddy_domain_name="$PROD_CADDY_DOMAIN_NAME"
-              caddy_letsencrypt_email="$PROD_CADDY_LETSENCRYPT_EMAIL"
-              cors_allowed_origins="$PROD_CORS_ALLOWED_ORIGINS"
-              ;;
-            devops/test-deploy-main)
-              deploy_host="$TEST_HOST"
-              deploy_dir="backend-test"
-              compose_project_name="test"
-              release_tag="test"
-              caddy_domain_name="$TEST_CADDY_DOMAIN_NAME"
-              caddy_letsencrypt_email="$TEST_CADDY_LETSENCRYPT_EMAIL"
-              cors_allowed_origins="$TEST_CORS_ALLOWED_ORIGINS"
-              ;;
-            *)
-              echo "::error::Unsupported deploy branch: $HEAD_BRANCH"
-              exit 1
-              ;;
-          esac
-
-          for required_value in \
-            "$deploy_host" \
-            "$deploy_dir" \
-            "$compose_project_name" \
-            "$release_tag" \
-            "$caddy_domain_name" \
-            "$caddy_letsencrypt_email" \
-            "$cors_allowed_origins"; do
-            if [ -z "$required_value" ]; then
-              echo "::error::Missing required deployment configuration for branch $HEAD_BRANCH"
-              exit 1
-            fi
-          done
-
-          echo "deploy_host=$deploy_host" >> "$GITHUB_OUTPUT"
-          echo "deploy_dir=$deploy_dir" >> "$GITHUB_OUTPUT"
-          echo "compose_project_name=$compose_project_name" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
-          echo "caddy_domain_name=$caddy_domain_name" >> "$GITHUB_OUTPUT"
-          echo "caddy_letsencrypt_email=$caddy_letsencrypt_email" >> "$GITHUB_OUTPUT"
-          echo "cors_allowed_origins=$cors_allowed_origins" >> "$GITHUB_OUTPUT"
-
-      - name: Validate deployment secrets
-        env:
+          CADDY_DOMAIN_NAME: ${{ vars.CADDY_DOMAIN_NAME }}
+          CADDY_LETSENCRYPT_EMAIL: ${{ vars.CADDY_LETSENCRYPT_EMAIL }}
+          CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          SSH_DEPLOY_HOST: ${{ vars.SSH_DEPLOY_HOST }}
           SSH_DEPLOY_USER: ${{ secrets.SSH_DEPLOY_USER }}
           SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
         run: |
           set -euo pipefail
 
-          for secret_name in DB_PASSWORD SSH_DEPLOY_USER SSH_DEPLOY_KEY; do
-            if [ -z "${!secret_name}" ]; then
-              echo "::error::Missing required secret: $secret_name"
+          for required_name in \
+            CADDY_DOMAIN_NAME \
+            CADDY_LETSENCRYPT_EMAIL \
+            CORS_ALLOWED_ORIGINS \
+            DB_PASSWORD \
+            SSH_DEPLOY_HOST \
+            SSH_DEPLOY_USER \
+            SSH_DEPLOY_KEY; do
+            if [ -z "${!required_name}" ]; then
+              echo "::error::Missing required deploy configuration: $required_name"
               exit 1
             fi
           done
@@ -107,12 +56,10 @@ jobs:
         env:
           REPOSITORY: ${{ github.repository }}
           IMAGE_SHA: ${{ github.event.workflow_run.head_sha }}
-          RELEASE_TAG: ${{ steps.target.outputs.release_tag }}
         run: |
           image_name="ghcr.io/${REPOSITORY,,}"
           echo "name=${image_name}" >> "$GITHUB_OUTPUT"
           echo "sha_tag=sha-${IMAGE_SHA}" >> "$GITHUB_OUTPUT"
-          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Login to container registry
         uses: docker/login-action@v3
@@ -129,14 +76,14 @@ jobs:
           pull: true
           tags: |
             ${{ steps.image.outputs.name }}:${{ steps.image.outputs.sha_tag }}
-            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.release_tag }}
+            ${{ steps.image.outputs.name }}:main
 
       - name: Render deployment environment
         env:
           CI_APP_IMAGE: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.sha_tag }}
-          CI_CADDY_DOMAIN_NAME: ${{ steps.target.outputs.caddy_domain_name }}
-          CI_CADDY_LETSENCRYPT_EMAIL: ${{ steps.target.outputs.caddy_letsencrypt_email }}
-          CI_CORS_ALLOWED_ORIGINS: ${{ steps.target.outputs.cors_allowed_origins }}
+          CI_CADDY_DOMAIN_NAME: ${{ vars.CADDY_DOMAIN_NAME }}
+          CI_CADDY_LETSENCRYPT_EMAIL: ${{ vars.CADDY_LETSENCRYPT_EMAIL }}
+          CI_CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
           CI_DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           CI_POSTGRES_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
@@ -144,42 +91,34 @@ jobs:
           pip3 install dump-env
           umask 077
           dump-env \
-            --template=.env.template \
-            --prefix='CI_' \
-            --strict CI_APP_IMAGE \
-            --strict CI_CADDY_DOMAIN_NAME \
-            --strict CI_CADDY_LETSENCRYPT_EMAIL \
-            --strict CI_CORS_ALLOWED_ORIGINS \
-            --strict CI_DB_PASSWORD \
-            --strict CI_POSTGRES_PASSWORD > .env
+            -t .env.template \
+            -p 'CI_' > .env
 
       - name: Copy deployment bundle to host
         uses: appleboy/scp-action@v1
         with:
-          host: ${{ steps.target.outputs.deploy_host }}
+          host: ${{ vars.SSH_DEPLOY_HOST }}
           username: ${{ secrets.SSH_DEPLOY_USER }}
           key: ${{ secrets.SSH_DEPLOY_KEY }}
           source: "."
-          target: ${{ steps.target.outputs.deploy_dir }}
+          target: "backend"
           rm: true
 
       - name: Pull and restart target stack
         uses: appleboy/ssh-action@v1
         env:
-          COMPOSE_PROJECT_NAME: ${{ steps.target.outputs.compose_project_name }}
-          DEPLOY_DIR: ${{ steps.target.outputs.deploy_dir }}
           REGISTRY_HOST: ghcr.io
           REGISTRY_USERNAME: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          host: ${{ steps.target.outputs.deploy_host }}
+          host: ${{ vars.SSH_DEPLOY_HOST }}
           username: ${{ secrets.SSH_DEPLOY_USER }}
           key: ${{ secrets.SSH_DEPLOY_KEY }}
-          envs: COMPOSE_PROJECT_NAME,DEPLOY_DIR,REGISTRY_HOST,REGISTRY_USERNAME,REGISTRY_TOKEN
+          envs: REGISTRY_HOST,REGISTRY_USERNAME,REGISTRY_TOKEN
           script: |
             set -euo pipefail
-            mkdir -p ~/"$DEPLOY_DIR" ~/frontend
-            cd ~/"$DEPLOY_DIR"
+            mkdir -p ~/backend ~/frontend
+            cd ~/backend
             printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin >/dev/null
             trap 'docker logout "$REGISTRY_HOST" >/dev/null 2>&1 || true' EXIT
             bash ./docker/deploy.sh
