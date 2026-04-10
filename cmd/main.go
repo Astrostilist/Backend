@@ -1,18 +1,20 @@
 package main
 
 import (
+	"context"
+	"encoding/base64"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
-	"context"
-    "os"
-    "os/signal"
-    "syscall"
+
+	"astroapi/config"
+	"astroapi/internal/database"
+	"astroapi/internal/handlers"
 
 	"github.com/joho/godotenv"
-	"astroapi/internal/handlers"
-    "astroapi/internal/database"
-	"astroapi/config"
 )
 
 func main() {
@@ -21,7 +23,19 @@ func main() {
 		log.Println("Warning: .env file not found, using system environment variables")
 	}
 
-    cfg := config.Load()
+	//Паникуем при отсутвие ключа
+	encodedKey := os.Getenv("ENCRYPTION_KEY")
+	if encodedKey == "" {
+		log.Fatal("ENCRYPTION_KEY is not set")
+	}
+	//Декодируем из base64
+	key, err := base64.StdEncoding.DecodeString(encodedKey)
+	if err != nil {
+		log.Fatal("Invalid base64 key:", err)
+	}
+	_ = key
+
+	cfg := config.Load()
 
 	// Инициализируем базу данных
 	if err := database.InitDB(cfg); err != nil {
@@ -29,16 +43,15 @@ func main() {
 	}
 
 	defer func() {
-        if err := database.DB.Close(); err != nil {
-            log.Printf("Error closing database connection: %v", err)
-        }
-    }()
-
+		if err := database.DB.Close(); err != nil {
+			log.Printf("Error closing database connection: %v", err)
+		}
+	}()
 
 	// Настраиваем маршруты
 	http.HandleFunc("/api/v1/", handlers.HelloWorldHandler)
 
-    // Создаем HTTP сервер с таймаутами
+	// Создаем HTTP сервер с таймаутами
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      nil,
@@ -46,7 +59,6 @@ func main() {
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-
 
 	// Запускаем сервер в горутине
 	go func() {
@@ -58,19 +70,19 @@ func main() {
 	}()
 
 	// Ожидаем сигнал для graceful shutdown
-    quit := make(chan os.Signal, 1)
-    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-    <-quit
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 
-    log.Println("Shutting down server...")
+	log.Println("Shutting down server...")
 
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-    if err := srv.Shutdown(ctx); err != nil {
-        log.Fatalf("Server forced to shutdown: %v", err)
-    }
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
 
-    log.Println("Server exited")
+	log.Println("Server exited")
 
 }
