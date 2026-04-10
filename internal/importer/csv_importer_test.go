@@ -5,62 +5,55 @@ import (
     "context"
     "database/sql"
     "fmt"
-    "os"
     "testing"
     "time"
 
     _ "github.com/lib/pq"
-    "github.com/joho/godotenv"
     "github.com/stretchr/testify/assert"
+    "github.com/testcontainers/testcontainers-go"
+    "github.com/testcontainers/testcontainers-go/wait"
 )
 
-func init() {
-    _ = godotenv.Load("../.env")
-}
+func TestImportPerformance(t *testing.T) {
+    if testing.Short() {
+        t.Skip("skipping performance test in short mode")
+    }
 
-func getTestDBParams() (host, port, user, password string) {
-    host = os.Getenv("DB_HOST")
-    if host == "" {
-        host = "localhost"
+    ctx := context.Background()
+    req := testcontainers.ContainerRequest{
+        Image:        "postgres:16-alpine",
+        ExposedPorts: []string{"5432/tcp"},
+        Env: map[string]string{
+            "POSTGRES_USER":     "test",
+            "POSTGRES_PASSWORD": "test",
+            "POSTGRES_DB":       "testdb",
+        },
+        WaitingFor: wait.ForLog("database system is ready to accept connections"),
     }
-    port = os.Getenv("DB_PORT")
-    if port == "" {
-        port = "5432"
-    }
-    user = os.Getenv("DB_USER")
-    if user == "" {
-        user = "postgres"
-    }
-    password = os.Getenv("DB_PASSWORD")
-    return
-}
-
-func getTestDB(t *testing.T) *sql.DB {
-    host, port, user, password := getTestDBParams()
-    adminConnStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=postgres sslmode=disable",
-        host, port, user, password)
-    adminDB, err := sql.Open("postgres", adminConnStr)
+    postgresContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+        ContainerRequest: req,
+        Started:          true,
+    })
     if err != nil {
-        t.Fatalf("Cannot connect to admin db: %v", err)
+        t.Skip("Docker not available, skipping test")
     }
-    defer func() {
-        _ = adminDB.Close()
-    }()
+    defer func() { _ = postgresContainer.Terminate(ctx) }()
 
-    _, _ = adminDB.Exec("DROP DATABASE IF EXISTS testdb")
-    _, err = adminDB.Exec("CREATE DATABASE testdb")
+    mappedPort, err := postgresContainer.MappedPort(ctx, "5432")
     if err != nil {
-        t.Fatalf("Cannot create testdb: %v", err)
+        t.Fatal(err)
     }
-
-    testConnStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=testdb sslmode=disable",
-        host, port, user, password)
-    testDB, err := sql.Open("postgres", testConnStr)
+    connStr := fmt.Sprintf("postgres://test:test@127.0.0.1:%s/testdb?sslmode=disable", mappedPort.Port())
+    db, err := sql.Open("postgres", connStr)
     if err != nil {
-        t.Fatalf("Cannot connect to testdb: %v", err)
+        t.Fatal(err)
+    }
+    defer func() { _ = db.Close() }()
+
+    if err := db.Ping(); err != nil {
+        t.Fatal("Cannot connect to database:", err)
     }
 
-    _, _ = testDB.Exec("DROP TABLE IF EXISTS products")
     createTableSQL := `
     CREATE TABLE products (
         sku TEXT PRIMARY KEY,
@@ -70,34 +63,9 @@ func getTestDB(t *testing.T) *sql.DB {
         tags JSONB,
         category TEXT
     );`
-    if _, err := testDB.Exec(createTableSQL); err != nil {
-        t.Fatalf("Cannot create table: %v", err)
+    if _, err := db.Exec(createTableSQL); err != nil {
+        t.Fatal(err)
     }
-    return testDB
-}
-
-func cleanupTestDB(t *testing.T, db *sql.DB) {
-    _ = db.Close()
-    host, port, user, password := getTestDBParams()
-    adminConnStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=postgres sslmode=disable",
-        host, port, user, password)
-    adminDB, err := sql.Open("postgres", adminConnStr)
-    if err != nil {
-        t.Logf("Warning: cannot connect to admin db for cleanup: %v", err)
-        return
-    }
-    defer func() {
-        _ = adminDB.Close()
-    }()
-    _, err = adminDB.Exec("DROP DATABASE IF EXISTS testdb")
-    if err != nil {
-        t.Logf("Warning: cannot drop testdb: %v", err)
-    }
-}
-
-func TestImportPerformance(t *testing.T) {
-    db := getTestDB(t)
-    defer cleanupTestDB(t, db)
 
     csvData := &bytes.Buffer{}
     csvData.WriteString("sku,name,description,price,tags,category\n")
@@ -108,7 +76,7 @@ func TestImportPerformance(t *testing.T) {
     }
 
     start := time.Now()
-    result, err := RunImport(context.Background(), db, csvData)
+    result, err := RunImport(ctx, db, csvData)
     elapsed := time.Since(start)
 
     assert.NoError(t, err)
@@ -118,19 +86,67 @@ func TestImportPerformance(t *testing.T) {
 }
 
 func TestImportSkipsInvalidRows(t *testing.T) {
-    db := getTestDB(t)
-    defer cleanupTestDB(t, db)
+    if testing.Short() {
+        t.Skip("skipping test in short mode")
+    }
 
-    var buf bytes.Buffer
-    buf.WriteString("sku,name,description,price,tags,category\n")
-    buf.WriteString("p1,good1,desc1,10.5,\"[\"\"a\"\"]\",cat1\n")
-    buf.WriteString("p2,bad,desc2,-1,\"[]\",cat2\n")
-    buf.WriteString("p3,good2,desc3,20.0,\"[]\",cat3") 
+    ctx := context.Background()
+    req := testcontainers.ContainerRequest{
+        Image:        "postgres:16-alpine",
+        ExposedPorts: []string{"5432/tcp"},
+        Env: map[string]string{
+            "POSTGRES_USER":     "test",
+            "POSTGRES_PASSWORD": "test",
+            "POSTGRES_DB":       "testdb",
+        },
+        WaitingFor: wait.ForLog("database system is ready to accept connections"),
+    }
+    postgresContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+        ContainerRequest: req,
+        Started:          true,
+    })
+    if err != nil {
+        t.Skip("Docker not available, skipping test")
+    }
+    defer func() { _ = postgresContainer.Terminate(ctx) }()
 
-    result, err := RunImport(context.Background(), db, &buf)
+    mappedPort, err := postgresContainer.MappedPort(ctx, "5432")
+    if err != nil {
+        t.Fatal(err)
+    }
+    connStr := fmt.Sprintf("postgres://test:test@127.0.0.1:%s/testdb?sslmode=disable", mappedPort.Port())
+    db, err := sql.Open("postgres", connStr)
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer func() { _ = db.Close() }()
+
+    if err := db.Ping(); err != nil {
+        t.Fatal("Cannot connect to database:", err)
+    }
+
+    createTableSQL := `
+    CREATE TABLE products (
+        sku TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        price DECIMAL(10,2) NOT NULL,
+        tags JSONB,
+        category TEXT
+    );`
+    if _, err := db.Exec(createTableSQL); err != nil {
+        t.Fatal(err)
+    }
+
+    csvData := bytes.NewBufferString(`sku,name,description,price,tags,category
+    p1,good1,desc1,10.5,"[""a""]",cat1
+    p2,bad,desc2,-1,"[]",cat2
+    p3,good2,desc3,20.0,"[]",cat3`)
+
+    result, err := RunImport(ctx, db, csvData)
     assert.NoError(t, err)
     assert.Equal(t, 2, result.Imported)
     assert.Equal(t, 1, result.Skipped)
-    assert.Len(t, result.Errors, 1, "expected exactly one error")
+    assert.Len(t, result.Errors, 1)
     assert.Contains(t, result.Errors[0], "price = \"-1\" должен быть >0")
 }
