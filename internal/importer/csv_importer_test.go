@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-    _ = godotenv.Load("../.env") 
+    _ = godotenv.Load("../.env")
 }
 
 func getTestDBParams() (host, port, user, password string) {
@@ -43,7 +43,9 @@ func getTestDB(t *testing.T) *sql.DB {
     if err != nil {
         t.Fatalf("Cannot connect to admin db: %v", err)
     }
-    defer adminDB.Close()
+    defer func() {
+        _ = adminDB.Close()
+    }()
 
     _, _ = adminDB.Exec("DROP DATABASE IF EXISTS testdb")
     _, err = adminDB.Exec("CREATE DATABASE testdb")
@@ -75,7 +77,7 @@ func getTestDB(t *testing.T) *sql.DB {
 }
 
 func cleanupTestDB(t *testing.T, db *sql.DB) {
-    db.Close()
+    _ = db.Close()
     host, port, user, password := getTestDBParams()
     adminConnStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=postgres sslmode=disable",
         host, port, user, password)
@@ -84,7 +86,9 @@ func cleanupTestDB(t *testing.T, db *sql.DB) {
         t.Logf("Warning: cannot connect to admin db for cleanup: %v", err)
         return
     }
-    defer adminDB.Close()
+    defer func() {
+        _ = adminDB.Close()
+    }()
     _, err = adminDB.Exec("DROP DATABASE IF EXISTS testdb")
     if err != nil {
         t.Logf("Warning: cannot drop testdb: %v", err)

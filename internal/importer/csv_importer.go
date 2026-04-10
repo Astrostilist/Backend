@@ -101,7 +101,9 @@ func flushBatch(ctx context.Context, db *sql.DB, products []*models.Product) err
     if err != nil {
         return err
     }
-    defer tx.Rollback()
+    defer func() {
+        _ = tx.Rollback()
+    }()
 
     stmt, err := tx.PrepareContext(ctx, `
         INSERT INTO products (sku, name, description, price, tags, category)
@@ -116,7 +118,9 @@ func flushBatch(ctx context.Context, db *sql.DB, products []*models.Product) err
     if err != nil {
         return err
     }
-    defer stmt.Close()
+    defer func() {
+        _ = stmt.Close()
+    }()
 
     for _, p := range products {
         tagsJSON, _ := json.Marshal(p.Tags)
@@ -126,5 +130,4 @@ func flushBatch(ctx context.Context, db *sql.DB, products []*models.Product) err
         }
     }
     return tx.Commit()
-
 }

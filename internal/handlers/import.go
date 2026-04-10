@@ -1,7 +1,7 @@
 package handlers
 
-import(
-	"encoding/json"
+import (
+    "encoding/json"
     "net/http"
     "astroapi/internal/database"
     "astroapi/internal/importer"
@@ -24,7 +24,11 @@ func ImportCatalogHandler(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "Missing file field", http.StatusBadRequest)
         return
     }
-    defer file.Close()
+    defer func() {
+        if err := file.Close(); err != nil {
+            http.Error(w, "Failed to close file", http.StatusInternalServerError)
+        }
+    }()
 
     result, err := importer.RunImport(r.Context(), database.DB.DB, file)
     if err != nil {
@@ -33,5 +37,8 @@ func ImportCatalogHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(result)
+    if err := json.NewEncoder(w).Encode(result); err != nil {
+        http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+        return
+    }
 }
