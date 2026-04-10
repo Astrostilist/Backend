@@ -1,0 +1,124 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    branches:
+      - main
+      - devops/test-deploy-main
+    types:
+      - completed
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    name: deploy
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release revision
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Validate deployment configuration
+        env:
+          CADDY_DOMAIN_NAME: ${{ vars.CADDY_DOMAIN_NAME }}
+          CADDY_LETSENCRYPT_EMAIL: ${{ vars.CADDY_LETSENCRYPT_EMAIL }}
+          CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          SSH_DEPLOY_HOST: ${{ vars.SSH_DEPLOY_HOST }}
+          SSH_DEPLOY_USER: ${{ secrets.SSH_DEPLOY_USER }}
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+
+          for required_name in \
+            CADDY_DOMAIN_NAME \
+            CADDY_LETSENCRYPT_EMAIL \
+            CORS_ALLOWED_ORIGINS \
+            DB_PASSWORD \
+            SSH_DEPLOY_HOST \
+            SSH_DEPLOY_USER \
+            SSH_DEPLOY_KEY; do
+            if [ -z "${!required_name}" ]; then
+              echo "::error::Missing required deploy configuration: $required_name"
+              exit 1
+            fi
+          done
+
+      - name: Prepare image metadata
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          IMAGE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          image_name="ghcr.io/${REPOSITORY,,}"
+          echo "name=${image_name}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=sha-${IMAGE_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          pull: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.sha_tag }}
+            ${{ steps.image.outputs.name }}:main
+
+      - name: Render deployment environment
+        env:
+          CI_APP_IMAGE: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.sha_tag }}
+          CI_CADDY_DOMAIN_NAME: ${{ vars.CADDY_DOMAIN_NAME }}
+          CI_CADDY_LETSENCRYPT_EMAIL: ${{ vars.CADDY_LETSENCRYPT_EMAIL }}
+          CI_CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
+          CI_DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          CI_POSTGRES_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          pip3 install dump-env
+          umask 077
+          dump-env \
+            -t .env.template \
+            -p 'CI_' > .env
+
+      - name: Copy deployment bundle to host
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ vars.SSH_DEPLOY_HOST }}
+          username: ${{ secrets.SSH_DEPLOY_USER }}
+          key: ${{ secrets.SSH_DEPLOY_KEY }}
+          source: "."
+          target: "backend"
+          rm: true
+
+      - name: Pull and restart target stack
+        uses: appleboy/ssh-action@v1
+        env:
+          REGISTRY_HOST: ghcr.io
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ vars.SSH_DEPLOY_HOST }}
+          username: ${{ secrets.SSH_DEPLOY_USER }}
+          key: ${{ secrets.SSH_DEPLOY_KEY }}
+          envs: REGISTRY_HOST,REGISTRY_USERNAME,REGISTRY_TOKEN
+          script: |
+            set -euo pipefail
+            mkdir -p ~/backend ~/frontend
+            cd ~/backend
+            printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin >/dev/null
+            trap 'docker logout "$REGISTRY_HOST" >/dev/null 2>&1 || true' EXIT
+            bash ./docker/deploy.sh

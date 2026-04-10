@@ -1,7 +1,9 @@
 package main
 
 import (
+feature/AB-API-02-recommend-endpoint
 	"astroapi/internal/messaging"
+dev
 	"context"
 	"log"
 	"net/http"
@@ -13,6 +15,9 @@ import (
 	"astroapi/config"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
+feature/AB-API-02-recommend-endpoint
+	"astroapi/internal/rules"
+ dev
 
 	"github.com/joho/godotenv"
 )
@@ -24,6 +29,12 @@ func main() {
 	}
 
 	cfg := config.Load()
+ feature/AB-API-02-recommend-endpoint
+
+	if cfg.AdminToken == "" {
+		log.Println("Warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
+	}
+  dev
 
 	// Инициализируем базу данных
 	if err := database.InitDB(cfg); err != nil {
@@ -40,16 +51,26 @@ func main() {
 			log.Printf("Error closing database connection: %v", err)
 		}
 	}()
+  feature/AB-API-02-recommend-endpoint
 
 	// Настраиваем маршруты
 	http.HandleFunc("/api/v1/", handlers.HelloWorldHandler)
 	http.HandleFunc("/api/v1/astro/profile", handlers.ProfileHandler)
 	http.HandleFunc("/api/v1/astro/recommend", handlers.RecommendHandler)
 
+	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
+	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
+
+	// Настраиваем маршруты
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/", handlers.HelloWorldHandler)
+	handlers.RegisterAdminRulesRoutes(mux, cfg.AdminToken, adminRulesHandler)
+ dev
+
 	// Создаем HTTP сервер с таймаутами
 	srv := &http.Server{
 		Addr:         ":8080",
-		Handler:      nil,
+		Handler:      mux,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
