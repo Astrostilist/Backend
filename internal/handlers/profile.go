@@ -31,7 +31,7 @@ func (req *ProfileRequest) Validate() map[string]string {
 
 // Обработка эндпоинта POST
 func ProfileHandler(w http.ResponseWriter, r *http.Request) {
-	// 1. Проверка метода
+	// Проверка метода
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return

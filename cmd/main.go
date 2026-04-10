@@ -44,6 +44,7 @@ func main() {
 	// Настраиваем маршруты
 	http.HandleFunc("/api/v1/", handlers.HelloWorldHandler)
 	http.HandleFunc("/api/v1/astro/profile", handlers.ProfileHandler)
+	http.HandleFunc("/api/v1/astro/recommend", handlers.RecommendHandler)
 
 	// Создаем HTTP сервер с таймаутами
 	srv := &http.Server{

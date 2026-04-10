@@ -8,7 +8,6 @@ import (
 )
 
 func TestProfileHandler(t *testing.T) {
-	// Создаем "таблицу" тест-кейсов
 	tests := []struct {
 		name           string
 		method         string
@@ -53,7 +52,7 @@ func TestProfileHandler(t *testing.T) {
 		},
 	}
 
-	// Запускаем цикл по нашей таблице
+	// Запускаем цикл
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Формируем запрос
@@ -62,7 +61,7 @@ func TestProfileHandler(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Создаем "диктофон" для записи ответа
+			// Создаем "диктофон"
 			rr := httptest.NewRecorder()
 			handler := http.HandlerFunc(ProfileHandler)
 
