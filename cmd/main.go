@@ -34,9 +34,24 @@ func main() {
         }
     }()
 
+	createTableSQL := `
+	CREATE TABLE IF NOT EXISTS products (
+    	sku TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+    	description TEXT,
+    	price DECIMAL(10,2) NOT NULL,
+	    tags JSONB,
+    	category TEXT
+	);`
+
+	if _, err := database.DB.DB.Exec(createTableSQL); err != nil {
+    	log.Fatalf("Failed to create products table: %v", err)
+	}
+	log.Println("Products table is ready")
 
 	// Настраиваем маршруты
 	http.HandleFunc("/api/v1/", handlers.HelloWorldHandler)
+	http.HandleFunc("/api/v1/admin/catalog/import", handlers.ImportCatalogHandler)
 
     // Создаем HTTP сервер с таймаутами
 	srv := &http.Server{
