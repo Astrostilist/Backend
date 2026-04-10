@@ -1,17 +1,18 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
-run_compose() { docker compose -p prod -f docker-compose.yaml -f docker/docker-compose.prod.yaml "$@"; }
+project_name="${COMPOSE_PROJECT_NAME:-prod}"
+compose_files=(-f docker-compose.yaml -f docker/docker-compose.prod.yaml)
 
-# build containers with build sections in compose
-run_compose build -q
+# Pull the already-built images published by the CD workflow.
+docker compose --project-name "$project_name" "${compose_files[@]}" pull
 
-# start project
-run_compose up -d --quiet-pull
+# Recreate the production stack from the pulled images and prune removed services.
+docker compose --project-name "$project_name" "${compose_files[@]}" up -d --remove-orphans
 
-# show containers status
-run_compose ps
+# Show the resulting container state for quick deployment diagnostics.
+docker compose --project-name "$project_name" "${compose_files[@]}" ps
 
-# Clear old backend images
+# Clear dangling images after the successful rollout.
 docker image prune -f

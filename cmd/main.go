@@ -13,6 +13,7 @@ import (
 	"astroapi/config"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
+	"astroapi/internal/rules"
 
 	"github.com/joho/godotenv"
 )
@@ -37,6 +38,10 @@ func main() {
 
 	cfg := config.Load()
 
+	if cfg.AdminToken == "" {
+		log.Println("Warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
+	}
+
 	// Инициализируем базу данных
 	if err := database.InitDB(cfg); err != nil {
 		log.Fatal("Failed to initialize database:", err)
@@ -48,13 +53,18 @@ func main() {
 		}
 	}()
 
+	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
+	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
+
 	// Настраиваем маршруты
-	http.HandleFunc("/api/v1/", handlers.HelloWorldHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/", handlers.HelloWorldHandler)
+	handlers.RegisterAdminRulesRoutes(mux, cfg.AdminToken, adminRulesHandler)
 
 	// Создаем HTTP сервер с таймаутами
 	srv := &http.Server{
 		Addr:         ":8080",
-		Handler:      nil,
+		Handler:      mux,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,

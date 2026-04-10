@@ -3,37 +3,40 @@ package config
 import (
 	"log"
 	"os"
-	"time"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	MemcachedHost   string
-	JaegerEndpoint  string
+	AdminToken string
+
+	MemcachedHost string
+
+	JaegerEndpoint    string
 	JaegerServiceName string
 
 	// Database
-    DBHost            string
-    DBPort            string
-    DBUser            string
-    DBPassword        string
-    DBName            string
-    DBSSLMode         string
+	DBHost     string
+	DBPort     string
+	DBUser     string
+	DBPassword string
+	DBName     string
+	DBSSLMode  string
 
-    // Pool settings
-    DBMaxConns        int32
-    DBMinConns        int32
-    DBMaxConnLifetime time.Duration
-    DBMaxConnIdleTime time.Duration
-    DBHealthCheckPeriod time.Duration
+	// Pool settings
+	DBMaxConns          int32
+	DBMinConns          int32
+	DBMaxConnLifetime   time.Duration
+	DBMaxConnIdleTime   time.Duration
+	DBHealthCheckPeriod time.Duration
 
-    // NATS
-    NATSHost          string
-    NATSPort          string
-    NATSClusterID     string
-    NATSClientID      string
+	// NATS
+	NATSHost      string
+	NATSPort      string
+	NATSClusterID string
+	NATSClientID  string
 }
 
 func Load() *Config {
@@ -43,16 +46,19 @@ func Load() *Config {
 	}
 
 	return &Config{
-		MemcachedHost:   getEnv("MEMCACHED_HOST", "localhost:11211"),
-		JaegerEndpoint:  getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
+		AdminToken: getEnv("ADMIN_TOKEN", ""),
+
+		MemcachedHost: getEnv("MEMCACHED_HOST", "localhost:11211"),
+
+		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
 		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
 
-        DBHost:            getEnv("DB_HOST", "localhost"),
-        DBPort:            getEnv("DB_PORT", "5432"),
-        DBUser:            getEnv("DB_USER", "postgres"),
-        DBPassword:        getEnv("DB_PASSWORD", ""),
-        DBName:            getEnv("DB_NAME", "myapi_db"),
-        DBSSLMode:         getEnv("DB_SSL_MODE", "disable"),
+		DBHost:     getEnv("DB_HOST", "localhost"),
+		DBPort:     getEnv("DB_PORT", "5432"),
+		DBUser:     getEnv("DB_USER", "postgres"),
+		DBPassword: getEnv("DB_PASSWORD", ""),
+		DBName:     getEnv("DB_NAME", "myapi_db"),
+		DBSSLMode:  getEnv("DB_SSL_MODE", "disable"),
 
 		DBMaxConns:          getEnvAsInt32("DB_MAX_CONNS", 50),
 		DBMinConns:          getEnvAsInt32("DB_MIN_CONNS", 20),
@@ -60,10 +66,10 @@ func Load() *Config {
 		DBMaxConnIdleTime:   getEnvAsDuration("DB_MAX_CONN_IDLE_TIME", 30*time.Minute),
 		DBHealthCheckPeriod: getEnvAsDuration("DB_HEALTH_CHECK_PERIOD", time.Minute),
 
-        NATSHost:          getEnv("NATS_HOST", "localhost"),
-        NATSPort:          getEnv("NATS_PORT", "4222"),
-        NATSClusterID:     getEnv("NATS_CLUSTER_ID", "test-cluster"),
-        NATSClientID:      getEnv("NATS_CLIENT_ID", "astro-backend"),
+		NATSHost:      getEnv("NATS_HOST", "localhost"),
+		NATSPort:      getEnv("NATS_PORT", "4222"),
+		NATSClusterID: getEnv("NATS_CLUSTER_ID", "test-cluster"),
+		NATSClientID:  getEnv("NATS_CLIENT_ID", "astro-backend"),
 	}
 }
 
@@ -73,7 +79,6 @@ func getEnv(key, defaultValue string) string {
 	}
 	return defaultValue
 }
-
 
 func getEnvAsInt32(key string, defaultValue int32) int32 {
 	if value := os.Getenv(key); value != "" {
