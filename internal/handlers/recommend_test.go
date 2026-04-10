@@ -78,7 +78,11 @@ func TestRecommendHandler(t *testing.T) {
 			// 6. Специфичные проверки
 			if tt.name == "Корректный запрос async -> 202" {
 				var response map[string]string
-				json.Unmarshal(rr.Body.Bytes(), &response)
+				err := json.Unmarshal(rr.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to unmarshal response: %v", err)
+				}
+
 				if response["request_id"] == "" {
 					t.Errorf("Ожидался request_id в ответе, но он пустой")
 				}

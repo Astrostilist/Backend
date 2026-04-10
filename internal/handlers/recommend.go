@@ -114,11 +114,14 @@ func RecommendHandler(w http.ResponseWriter, r *http.Request) {
 		// Имитация успешного ответа от нейросети через 2 секунды
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"request_id": requestID,
 			"result":     "Здесь будет крутая рекомендация от AlisaAI",
 			"status":     "completed",
-		})
+		}); err != nil {
+			// Если вдруг не получилось закодировать, отдаем ошибку сервера
+			http.Error(w, `{"error": "failed to encode response"}`, http.StatusInternalServerError)
+		}
 
 	case <-ctx.Done():
 		http.Error(w, `{"error": "timeout: AI service is taking too long"}`, http.StatusGatewayTimeout)
