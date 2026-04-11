@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"astroapi/internal/database"
 	"encoding/json"
 	"net/http"
 )
@@ -43,4 +44,17 @@ func (h *HelloHandler) HelloWorldHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
+}
+
+type RealHelloService struct{}
+
+func (s *RealHelloService) GetDBStatus() string {
+	if database.DB != nil {
+		if err := database.DB.Ping(); err == nil {
+			return "connected"
+		} else {
+			return "disconnected"
+		}
+	}
+	return "not initialized"
 }

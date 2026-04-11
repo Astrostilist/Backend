@@ -47,20 +47,25 @@ func main() {
 		}
 	}()
 
-	// Настраиваем маршруты
-	http.HandleFunc("/api/v1/", handlers.HelloWorldHandler)
-	http.HandleFunc("/api/v1/astro/profile", handlers.ProfileHandler)
-	http.HandleFunc("/api/v1/astro/recommend", handlers.RecommendHandler)
-
+	// Инициализируем репозитории и сервисы
 	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
 
-	// Настраиваем маршруты
+	// Создаем реальный сервис и передаем его в хендлер
+	helloService := &handlers.RealHelloService{}
+	helloHandler := handlers.NewHelloHandler(helloService)
+
+	// Настраиваем роутер chi
 	router := chi.NewRouter()
-	router.Get("/api/v1/", handlers.HelloWorldHandler)
+
+	// Регистрируем ВСЕ маршруты строго через router
+	router.Get("/api/v1/", helloHandler.HelloWorldHandler)
+	router.Post("/api/v1/astro/profile", handlers.ProfileHandler)
+	router.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
+
 	handlers.RegisterAdminRulesRoutes(router, cfg.AdminToken, adminRulesHandler)
 
-	// Создаем HTTP сервер с таймаутами
+	// Создаем HTTP сервер
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      router,
@@ -72,7 +77,6 @@ func main() {
 	// Запускаем сервер в горутине
 	go func() {
 		log.Printf("App starting on port 8080")
-
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal("Server failed to start:", err)
 		}
@@ -93,5 +97,4 @@ func main() {
 	}
 
 	log.Println("Server exited")
-
 }
