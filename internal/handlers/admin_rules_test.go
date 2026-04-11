@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"astroapi/internal/rules"
+
+	"github.com/go-chi/chi/v5"
 )
 
 const testAdminToken = "test-admin-token"
@@ -99,10 +101,10 @@ func (r *fakeRulesRepository) Deactivate(_ context.Context, id string) (rules.Ru
 	return currentRule, nil
 }
 
-func newAdminRulesTestMux(repository rules.Repository) *http.ServeMux {
-	mux := http.NewServeMux()
-	RegisterAdminRulesRoutes(mux, testAdminToken, NewAdminRulesHandler(repository))
-	return mux
+func newAdminRulesTestMux(repository rules.Repository) chi.Router {
+	router := chi.NewRouter()
+	RegisterAdminRulesRoutes(router, testAdminToken, NewAdminRulesHandler(repository))
+	return router
 }
 
 func TestAdminRulesRequireToken(t *testing.T) {

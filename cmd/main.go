@@ -15,6 +15,7 @@ import (
 	"astroapi/internal/handlers"
 	"astroapi/internal/rules"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
 )
 
@@ -55,14 +56,14 @@ func main() {
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
 
 	// Настраиваем маршруты
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/", handlers.HelloWorldHandler)
-	handlers.RegisterAdminRulesRoutes(mux, cfg.AdminToken, adminRulesHandler)
+	router := chi.NewRouter()
+	router.Get("/api/v1/", handlers.HelloWorldHandler)
+	handlers.RegisterAdminRulesRoutes(router, cfg.AdminToken, adminRulesHandler)
 
 	// Создаем HTTP сервер с таймаутами
 	srv := &http.Server{
 		Addr:         ":8080",
-		Handler:      mux,
+		Handler:      router,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,

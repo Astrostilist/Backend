@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"astroapi/internal/rules"
+
+	"github.com/go-chi/chi/v5"
 )
 
 const (
@@ -40,11 +42,14 @@ func NewAdminRulesHandler(repository rules.Repository) *AdminRulesHandler {
 	return &AdminRulesHandler{repository: repository}
 }
 
-func RegisterAdminRulesRoutes(mux *http.ServeMux, adminToken string, handler *AdminRulesHandler) {
-	mux.Handle("GET /api/v1/admin/rules", AdminAuthMiddleware(adminToken, http.HandlerFunc(handler.ListRules)))
-	mux.Handle("POST /api/v1/admin/rules", AdminAuthMiddleware(adminToken, http.HandlerFunc(handler.CreateRule)))
-	mux.Handle("PUT /api/v1/admin/rules/{id}", AdminAuthMiddleware(adminToken, http.HandlerFunc(handler.UpdateRule)))
-	mux.Handle("DELETE /api/v1/admin/rules/{id}", AdminAuthMiddleware(adminToken, http.HandlerFunc(handler.DeleteRule)))
+func RegisterAdminRulesRoutes(router chi.Router, adminToken string, handler *AdminRulesHandler) {
+	router.Route("/api/v1/admin/rules", func(router chi.Router) {
+		router.Use(AdminAuthMiddleware(adminToken))
+		router.Get("/", handler.ListRules)
+		router.Post("/", handler.CreateRule)
+		router.Put("/{id}", handler.UpdateRule)
+		router.Delete("/{id}", handler.DeleteRule)
+	})
 }
 
 func (h *AdminRulesHandler) ListRules(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +102,7 @@ func (h *AdminRulesHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminRulesHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
-	ruleID := strings.TrimSpace(r.PathValue("id"))
+	ruleID := strings.TrimSpace(chi.URLParam(r, "id"))
 	if ruleID == "" {
 		writeError(w, http.StatusBadRequest, "rule id is required")
 		return
@@ -132,7 +137,7 @@ func (h *AdminRulesHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminRulesHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
-	ruleID := strings.TrimSpace(r.PathValue("id"))
+	ruleID := strings.TrimSpace(chi.URLParam(r, "id"))
 	if ruleID == "" {
 		writeError(w, http.StatusBadRequest, "rule id is required")
 		return
