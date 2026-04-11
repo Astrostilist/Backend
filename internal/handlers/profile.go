@@ -31,11 +31,6 @@ func (req *ProfileRequest) Validate() map[string]string {
 
 // Обработка эндпоинта POST
 func ProfileHandler(w http.ResponseWriter, r *http.Request) {
-	// Проверка метода
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
 	// Предохранитель от OOM
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)

@@ -48,23 +48,18 @@ func (req *RecommendRequest) Validate() map[string]string {
 }
 
 func RecommendHandler(w http.ResponseWriter, r *http.Request) {
-	// 1. Проверка метода
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
-	// 2. Защита от OOM
+	// Защита от OOM
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
-	// 3. Декодирование JSON
+	// Декодирование JSON
 	var req RecommendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error": "invalid json format"}`, http.StatusBadRequest)
 		return
 	}
 
-	// 4. Валидация
+	// Валидация
 	if validationErrors := req.Validate(); len(validationErrors) > 0 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -78,7 +73,7 @@ func RecommendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Генерируем ID
+	// Генерируем ID
 	requestID := uuid.New().String()
 
 	payload, err := json.Marshal(req)
