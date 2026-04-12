@@ -15,13 +15,12 @@ import (
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 
+	"astroapi/internal/rules"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
-	"astroapi/internal/rules"
-
-	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -69,9 +68,10 @@ func main() {
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,
-			log.Printf("Error closing database connection: %v", err)
-		}
-	}()
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
 
 	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
@@ -80,15 +80,6 @@ func main() {
 	router := chi.NewRouter()
 	router.Get("/api/v1/", handlers.HelloWorldHandler)
 	handlers.RegisterAdminRulesRoutes(router, cfg.AdminToken, adminRulesHandler)
-
-	// Создаем HTTP сервер с таймаутами
-	srv := &http.Server{
-		Addr:         ":8080",
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
 
 	// Запускаем сервер в горутине
 	go func() {
