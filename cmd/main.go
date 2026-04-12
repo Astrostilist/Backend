@@ -19,14 +19,17 @@ import (
 
 	natsadapter "astroapi/internal/nats"
 	natsinfra "astroapi/internal/repositories/nats"
+
 	"astroapi/internal/rules"
 	"astroapi/internal/usecases"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
+
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+
 	"go.uber.org/zap"
 )
 
@@ -133,7 +136,6 @@ func main() {
 	// Запускаем сервер в горутине
 	go func() {
 		logger.Info("App starting on port 8080")
-
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("Server failed to start", zap.Error(err))
 		}
@@ -149,10 +151,6 @@ func main() {
 	downctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
-	}
-
 	if err := srv.Shutdown(downctx); err != nil {
 		logger.Fatal("Server forced to shutdown", zap.Error(err))
 		if closeErr := srv.Close(); closeErr != nil {
@@ -161,5 +159,4 @@ func main() {
 	}
 
 	logger.Info("Server exited")
-
 }
