@@ -13,15 +13,17 @@ import (
 	"astroapi/config"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
+
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 
 	natsadapter "astroapi/internal/nats"
 	natsinfra "astroapi/internal/repositories/nats"
+	"astroapi/internal/rules"
 	"astroapi/internal/usecases"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -35,6 +37,10 @@ func main() {
 	}
 
 	cfg := config.Load()
+
+	if cfg.AdminToken == "" {
+		log.Println("Warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
+	}
 
 	// Инициализируем логгер
 	logger, err := logger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
@@ -104,13 +110,16 @@ func main() {
 		}
 	}()
 
+	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
+	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
+
 	// Настраиваем маршруты
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(astromidware.RequestLogger(logger))
 	r.Use(middleware.Recoverer)
-
 	r.Get("/api/v1/", handlers.HelloWorldHandler)
+	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 
 	// Создаем HTTP сервер с таймаутами
 	srv := &http.Server{
@@ -139,6 +148,10 @@ func main() {
 
 	downctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
 
 	if err := srv.Shutdown(downctx); err != nil {
 		logger.Fatal("Server forced to shutdown", zap.Error(err))

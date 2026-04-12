@@ -8,9 +8,9 @@ import (
 )
 
 type Response struct {
-    Message string      `json:"message"`
-    Data    interface{} `json:"data,omitempty"`
-    Error   string      `json:"error,omitempty"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // HelloWorldHandler обрабатывает GET запрос на /api/v1/
@@ -21,17 +21,17 @@ func HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-    // Проверяем подключение к БД
-    var dbStatus string
-    if database.DB != nil {
-        if err := database.DB.Ping(); err == nil {
-            dbStatus = "connected"
-        } else {
-            dbStatus = "disconnected"
-        }
-    } else {
-        dbStatus = "not initialized"
-    }
+	// Проверяем подключение к БД
+	var dbStatus string
+	if database.DB != nil {
+		if err := database.DB.Ping(); err == nil {
+			dbStatus = "connected"
+		} else {
+			dbStatus = "disconnected"
+		}
+	} else {
+		dbStatus = "not initialized"
+	}
 
 	// Устанавливаем заголовок Content-Type
 	w.Header().Set("Content-Type", "application/json")
@@ -39,9 +39,9 @@ func HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
 	// Создаем ответ
 	response := Response{
 		Message: "Hello world",
-		Data: map[string]interface{}{
-            "database_status": dbStatus,
-        },
+		Data: map[string]any{
+			"database_status": dbStatus,
+		},
 	}
 
 	// Кодируем в JSON и отправляем
