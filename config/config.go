@@ -13,7 +13,7 @@ type Config struct {
 	// App
 	LogServiceName string
 	LogLevel       string
-	AdminToken string
+	AdminToken     string
 
 	MemcachedHost string
 
