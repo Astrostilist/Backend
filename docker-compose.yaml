@@ -24,8 +24,24 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      memcached:
+        condition: service_started
     expose:
       - 8080
+    restart: unless-stopped
+
+  memcached:
+    image: memcached:1.6.39-alpine
+    command:
+      - --conn-limit=1024
+      - --memory-limit=64
+      - --threads=2
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    expose:
+      - 11211
     restart: unless-stopped
 
   jaeger:
@@ -38,9 +54,6 @@ services:
   nats:
     image: nats:alpine
     command: ["-js", "-c", "/etc/nats/nats-server.conf"]
-    ports:
-      - "4222:4222"
-      - "8222:8222"
     volumes:
       - nats-data:/data
       - ./docker/nats/nats-server.conf:/etc/nats/nats-server.conf:ro

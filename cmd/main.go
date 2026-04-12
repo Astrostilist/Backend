@@ -15,10 +15,13 @@ import (
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
+	"astroapi/internal/rules"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -39,6 +42,9 @@ func main() {
 			log.Printf("Failed to sync logger: %v", err)
 		}
 	}()
+	if cfg.AdminToken == "" {
+		log.Println("Warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
+	}
 
 	// Инициализируем базу данных
 	if err := database.InitDB(cfg); err != nil {
@@ -63,6 +69,22 @@ func main() {
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,
+			log.Printf("Error closing database connection: %v", err)
+		}
+	}()
+
+	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
+	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
+
+	// Настраиваем маршруты
+	router := chi.NewRouter()
+	router.Get("/api/v1/", handlers.HelloWorldHandler)
+	handlers.RegisterAdminRulesRoutes(router, cfg.AdminToken, adminRulesHandler)
+
+	// Создаем HTTP сервер с таймаутами
+	srv := &http.Server{
+		Addr:         ":8080",
+		Handler:      router,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -71,7 +93,6 @@ func main() {
 	// Запускаем сервер в горутине
 	go func() {
 		logger.Info("App starting on port 8080")
-
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("Server failed to start", zap.Error(err))
 		}
@@ -95,5 +116,4 @@ func main() {
 	}
 
 	logger.Info("Server exited")
-
 }
