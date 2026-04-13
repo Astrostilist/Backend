@@ -8,7 +8,6 @@ import (
     "os"
     "os/signal"
     "syscall"
-	"database/sql"
 
 	"github.com/joho/godotenv"
 	"github.com/pressly/goose/v3"
