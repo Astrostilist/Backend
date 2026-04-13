@@ -10,17 +10,6 @@ import (
 	"github.com/lib/pq"
 )
 
-type RulesEngine struct {
-	Id             string // UUID
-	Name           string // название триггера
-	AstroCondition []string
-	ProductTags    []string // массив тегов
-	Priority       int      // чем меньше, тем важнее
-	Is_active      bool     // активно
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
 // RulesModel - инкапсулирует пул соединений БД.
 type RulesModel struct {
 	DB *sql.DB
