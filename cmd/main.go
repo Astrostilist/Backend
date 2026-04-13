@@ -8,8 +8,10 @@ import (
     "os"
     "os/signal"
     "syscall"
+	"database/sql"
 
 	"github.com/joho/godotenv"
+	"github.com/pressly/goose/v3"
 	"astroapi/internal/handlers"
     "astroapi/internal/database"
 	"astroapi/config"
@@ -34,20 +36,14 @@ func main() {
         }
     }()
 
-	createTableSQL := `
-	CREATE TABLE IF NOT EXISTS products (
-    	sku TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-    	description TEXT,
-    	price DECIMAL(10,2) NOT NULL,
-	    tags JSONB,
-    	category TEXT
-	);`
-
-	if _, err := database.DB.DB.Exec(createTableSQL); err != nil {
-    	log.Fatalf("Failed to create products table: %v", err)
+	if err := goose.SetDialect("postgres"); err != nil {
+    log.Fatal("Failed to set goose dialect:", err)
 	}
-	log.Println("Products table is ready")
+	
+	if err := goose.Up(database.DB.DB, "./migrations"); err != nil {
+    log.Fatal("Failed to apply migrations:", err)
+	}
+	log.Println("Migrations applied")
 
 	// Настраиваем маршруты
 	http.HandleFunc("/api/v1/", handlers.HelloWorldHandler)
