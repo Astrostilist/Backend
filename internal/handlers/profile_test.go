@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func TestProfileHandler(t *testing.T) {
@@ -64,10 +66,13 @@ func TestProfileHandler(t *testing.T) {
 
 			// Создаем "диктофон" для записи ответа
 			rr := httptest.NewRecorder()
-			handler := http.HandlerFunc(ProfileHandler)
+
+			// Используем роутер chi для тестирования
+			r := chi.NewRouter()
+			r.Post("/api/v1/astro/profile", ProfileHandler)
 
 			// Выполняем запрос
-			handler.ServeHTTP(rr, req)
+			r.ServeHTTP(rr, req)
 
 			// Проверяем статус-код
 			if status := rr.Code; status != tt.expectedStatus {

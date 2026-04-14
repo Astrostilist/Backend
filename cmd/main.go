@@ -55,7 +55,7 @@ func main() {
 		}
 	}()
 
-	// Инициализируем NATS
+	// Инициализируем NATS (продвинутая настройка из dev)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opts := []nats.Option{
@@ -89,7 +89,7 @@ func main() {
 		logger.Fatal("Failed to create JetStream context", zap.Error(err))
 	}
 
-	// Dependency injection
+	// Dependency injection для NATS стримов
 	streamRepo := natsinfra.NewJetStreamRepository(js)
 	streamUC := usecases.NewStreamUseCase(streamRepo)
 	streamManager := natsadapter.NewStreamManager(streamUC, logger)
@@ -111,19 +111,27 @@ func main() {
 		}
 	}()
 
+	// Инициализируем репозитории и сервисы (DI)
 	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
 
-	// Настраиваем маршруты
+	helloService := &handlers.RealHelloService{}
+	helloHandler := handlers.NewHelloHandler(helloService)
+
+	// Настраиваем роутер chi и middleware (единый блок)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(astromidware.RequestLogger(logger))
 	r.Use(middleware.Recoverer)
-	r.Get("/api/v1/", handlers.HelloWorldHandler)
-	r.Post("/api/v1/astro/profile", handlers.ProfileHandler) // Добавили профиль в chi
+
+	// Регистрируем ВСЕ маршруты
+	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
+	r.Post("/api/v1/astro/profile", handlers.ProfileHandler)
+	r.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
+
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 
-	// Создаем HTTP сервер с таймаутами
+	// Создаем HTTP сервер
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,

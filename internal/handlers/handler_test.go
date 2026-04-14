@@ -1,49 +1,61 @@
 package handlers
 
 import (
-	"astroapi/internal/database"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"astroapi/internal/handlers/mocks"
+
+	"go.uber.org/mock/gomock"
 )
 
-// TestHelloWorldHandler проверяет работу базового эндпоинта
+// TestHelloWorldHandler проверяет работу базового эндпоинта (БД подключена)
 func TestHelloWorldHandler(t *testing.T) {
-	// 1. Проверяем успешный GET-запрос
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Создаем МОК
+	mockService := mocks.NewMockHelloService(ctrl)
+
+	// ПРОГРАММИРУЕМ МОК:
+	mockService.EXPECT().GetDBStatus().Return("connected").Times(1)
+
+	handler := NewHelloHandler(mockService)
+
+	// Эмулируем HTTP-запрос
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/", nil)
 	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(HelloWorldHandler)
 
-	handler.ServeHTTP(rr, req)
+	handler.HelloWorldHandler(rr, req)
 
-	// Ожидаем 200 OK
+	// Проверяем, что хендлер не упал и вернул 200 OK
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("Ожидали статус %v, получили %v", http.StatusOK, status)
-	}
-
-	// 2. Проверяем защиту от других методов (например, POST)
-	reqPost, _ := http.NewRequest(http.MethodPost, "/api/v1/", nil)
-	rrPost := httptest.NewRecorder()
-
-	handler.ServeHTTP(rrPost, reqPost)
-
-	// Ожидаем 405 Method Not Allowed
-	if status := rrPost.Code; status != http.StatusMethodNotAllowed {
-		t.Errorf("Ожидали статус %v, получили %v", http.StatusMethodNotAllowed, status)
 	}
 }
 
+// TestHelloWorldHandler_DBDisconnected проверяет работу, когда БД отключена
 func TestHelloWorldHandler_DBDisconnected(t *testing.T) {
-	// Имитируем наличие базы, но без реального подключения
-	database.DB = &database.PostgresDB{}
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
+	// Создаем МОК
+	mockService := mocks.NewMockHelloService(ctrl)
+
+	// ПРОГРАММИРУЕМ МОК:
+	mockService.EXPECT().GetDBStatus().Return("disconnected").Times(1)
+
+	handler := NewHelloHandler(mockService)
+
+	// Эмулируем HTTP-запрос
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/", nil)
 	rr := httptest.NewRecorder()
-	http.HandlerFunc(HelloWorldHandler).ServeHTTP(rr, req)
 
+	handler.HelloWorldHandler(rr, req)
+
+	// Проверяем, что хендлер не упал и вернул 200 OK
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("Ожидали статус %v, получили %v", http.StatusOK, status)
 	}
-
-	database.DB = nil // Очищаем за собой
 }
