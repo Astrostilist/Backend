@@ -10,9 +10,6 @@ import (
 )
 
 func TestProfileHandler(t *testing.T) {
-)
-
-func TestProfileHandler(t *testing.T) {
 	// Создаем "таблицу" тест-кейсов
 	tests := []struct {
 		name           string
@@ -58,7 +55,6 @@ func TestProfileHandler(t *testing.T) {
 		},
 	}
 
-	// Запускаем цикл
 	// Запускаем цикл по нашей таблице
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -67,20 +63,16 @@ func TestProfileHandler(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			// Создаем "диктофон" для записи ответа
 			rr := httptest.NewRecorder()
-			// Создаем "диктофон"
+
+			// Используем роутер chi для тестирования
 			r := chi.NewRouter()
 			r.Post("/api/v1/astro/profile", ProfileHandler)
 
 			// Выполняем запрос
 			r.ServeHTTP(rr, req)
-
-			// Создаем "диктофон" для записи ответа
-			rr := httptest.NewRecorder()
-			handler := http.HandlerFunc(ProfileHandler)
-
-			// Выполняем запрос
-			handler.ServeHTTP(rr, req)
 
 			// Проверяем статус-код
 			if status := rr.Code; status != tt.expectedStatus {
