@@ -1,8 +1,6 @@
 package main
 
 import (
-	"astroapi/internal/messaging"
-	"context"
 	"context"
 	"fmt"
 	"log"
@@ -15,8 +13,6 @@ import (
 	"astroapi/config"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
-
-	"github.com/joho/godotenv"
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 
@@ -99,8 +95,8 @@ func main() {
 	streamManager := natsadapter.NewStreamManager(streamUC, logger)
 
 	// Инициализируем стримы
-	jsctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	jsctx, cancelInit := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelInit()
 	if err := streamManager.Initialize(jsctx); err != nil {
 		logger.Fatal("Failed to initialize streams", zap.Error(err))
 	}
@@ -109,22 +105,8 @@ func main() {
 	if err := database.InitDB(cfg); err != nil {
 		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
-	nc, err := messaging.InitNATS(cfg)
-	if err != nil {
-		log.Fatal("Failed to initialize NATS:", err)
-	}
-	defer nc.Close()
-
 	defer func() {
 		if err := database.DB.Close(); err != nil {
-			log.Printf("Error closing database connection: %v", err)
-		}
-	}()
-
-	// Настраиваем маршруты
-	http.HandleFunc("/api/v1/", handlers.HelloWorldHandler)
-	http.HandleFunc("/api/v1/astro/profile", handlers.ProfileHandler)
-
 			logger.Error("Error closing database connection", zap.Error(err))
 		}
 	}()
@@ -138,8 +120,8 @@ func main() {
 	r.Use(astromidware.RequestLogger(logger))
 	r.Use(middleware.Recoverer)
 	r.Get("/api/v1/", handlers.HelloWorldHandler)
+	r.Post("/api/v1/astro/profile", handlers.ProfileHandler) // Добавили профиль в chi
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
-
 
 	// Создаем HTTP сервер с таймаутами
 	srv := &http.Server{
@@ -163,22 +145,10 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
-	}
-
-	log.Println("Server exited")
-
-
 	logger.Info("Shutting down server...")
 
-	downctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	downctx, cancelDown := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelDown()
 
 	if err := srv.Shutdown(downctx); err != nil {
 		logger.Fatal("Server forced to shutdown", zap.Error(err))
