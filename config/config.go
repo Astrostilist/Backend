@@ -10,7 +10,10 @@ import (
 )
 
 type Config struct {
-	AdminToken string
+	// App
+	LogServiceName string
+	LogLevel       string
+	AdminToken     string
 
 	MemcachedHost string
 
@@ -46,12 +49,15 @@ func Load() *Config {
 	}
 
 	return &Config{
-		AdminToken: getEnv("ADMIN_TOKEN", ""),
-
-		MemcachedHost: getEnv("MEMCACHED_HOST", "localhost:11211"),
+		LogServiceName: getEnv("LOG_SERVICE_NAME", "astro-backend"),
+		LogLevel:       getEnv("LOG_LEVEL", "INFO"),
 
 		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
 		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
+
+		AdminToken: getEnv("ADMIN_TOKEN", ""),
+
+		MemcachedHost: getEnv("MEMCACHED_HOST", "localhost:11211"),
 
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnv("DB_PORT", "5432"),
