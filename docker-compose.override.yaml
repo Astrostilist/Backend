@@ -1,5 +1,5 @@
 services:
-  db:
+  postgres:
     ports:
       - "5432:5432"
 
@@ -9,7 +9,7 @@ services:
 
   memcached:
     ports:
-    - "11211:11211"
+      - "11211:11211"
 
   jaeger:
     ports:
@@ -18,4 +18,5 @@ services:
 
   nats:
     ports:
+      - "4222:4222"
       - "8222:8222"
