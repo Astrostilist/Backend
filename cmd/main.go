@@ -1,7 +1,6 @@
 package main
 
 import (
-	"astroapi/internal/messaging"
 	"context"
 	"fmt"
 	"log"
@@ -56,7 +55,7 @@ func main() {
 		}
 	}()
 
-	// Инициализируем NATS
+	// Инициализируем NATS (продвинутая настройка из dev)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opts := []nats.Option{
@@ -90,7 +89,7 @@ func main() {
 		logger.Fatal("Failed to create JetStream context", zap.Error(err))
 	}
 
-	// Dependency injection
+	// Dependency injection для NATS стримов
 	streamRepo := natsinfra.NewJetStreamRepository(js)
 	streamUC := usecases.NewStreamUseCase(streamRepo)
 	streamManager := natsadapter.NewStreamManager(streamUC, logger)
@@ -106,44 +105,30 @@ func main() {
 	if err := database.InitDB(cfg); err != nil {
 		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
-
-	nc, err := messaging.InitNATS(cfg)
-	if err != nil {
-		log.Fatal("Failed to initialize NATS:", err)
-	}
-	defer nc.Close()
-
 	defer func() {
 		if err := database.DB.Close(); err != nil {
 			logger.Error("Error closing database connection", zap.Error(err))
 		}
 	}()
 
-	// Инициализируем репозитории и сервисы
+	// Инициализируем репозитории и сервисы (DI)
 	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
 
-	// Создаем реальный сервис и передаем его в хендлер
 	helloService := &handlers.RealHelloService{}
 	helloHandler := handlers.NewHelloHandler(helloService)
 
-	// Настраиваем роутер chi
-	router := chi.NewRouter()
-
-	// Регистрируем ВСЕ маршруты строго через router
-	router.Get("/api/v1/", helloHandler.HelloWorldHandler)
-	router.Post("/api/v1/astro/profile", handlers.ProfileHandler)
-	router.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
-
-	handlers.RegisterAdminRulesRoutes(router, cfg.AdminToken, adminRulesHandler)
-  
-	// Настраиваем маршруты
+	// Настраиваем роутер chi и middleware (единый блок)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(astromidware.RequestLogger(logger))
 	r.Use(middleware.Recoverer)
-	r.Get("/api/v1/", handlers.HelloWorldHandler)
-	r.Post("/api/v1/astro/profile", handlers.ProfileHandler) // Добавили профиль в chi
+
+	// Регистрируем ВСЕ маршруты
+	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
+	r.Post("/api/v1/astro/profile", handlers.ProfileHandler)
+	r.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
+
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 
 	// Создаем HTTP сервер
@@ -157,9 +142,7 @@ func main() {
 
 	// Запускаем сервер в горутине
 	go func() {
-		log.Printf("App starting on port 8080")
 		logger.Info("App starting on port 8080")
-
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("Server failed to start", zap.Error(err))
 		}
@@ -182,6 +165,5 @@ func main() {
 		}
 	}
 
-	log.Println("Server exited")
 	logger.Info("Server exited")
 }
