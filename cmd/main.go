@@ -13,7 +13,6 @@ import (
 	"astroapi/config"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
-
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 
@@ -96,8 +95,8 @@ func main() {
 	streamManager := natsadapter.NewStreamManager(streamUC, logger)
 
 	// Инициализируем стримы
-	jsctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	jsctx, cancelInit := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelInit()
 	if err := streamManager.Initialize(jsctx); err != nil {
 		logger.Fatal("Failed to initialize streams", zap.Error(err))
 	}
@@ -106,7 +105,6 @@ func main() {
 	if err := database.InitDB(cfg); err != nil {
 		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
-
 	defer func() {
 		if err := database.DB.Close(); err != nil {
 			logger.Error("Error closing database connection", zap.Error(err))
@@ -122,6 +120,7 @@ func main() {
 	r.Use(astromidware.RequestLogger(logger))
 	r.Use(middleware.Recoverer)
 	r.Get("/api/v1/", handlers.HelloWorldHandler)
+	r.Post("/api/v1/astro/profile", handlers.ProfileHandler) // Добавили профиль в chi
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 
 	// Создаем HTTP сервер с таймаутами
@@ -148,8 +147,8 @@ func main() {
 
 	logger.Info("Shutting down server...")
 
-	downctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	downctx, cancelDown := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelDown()
 
 	if err := srv.Shutdown(downctx); err != nil {
 		logger.Fatal("Server forced to shutdown", zap.Error(err))
