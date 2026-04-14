@@ -44,7 +44,7 @@ func NewAdminRulesHandler(repository rules.Repository) *AdminRulesHandler {
 
 func RegisterAdminRulesRoutes(router chi.Router, adminToken string, handler *AdminRulesHandler) {
 	router.Route("/api/v1/admin/rules", func(router chi.Router) {
-		//router.Use(AdminAuthMiddleware(adminToken))
+		router.Use(AdminAuthMiddleware(adminToken))
 		router.Get("/", handler.ListRules)
 		router.Post("/", handler.CreateRule)
 		router.Put("/{id}", handler.UpdateRule)
