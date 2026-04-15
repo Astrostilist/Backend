@@ -5,6 +5,7 @@ import (
 	"astroapi/internal/models"
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -27,8 +28,6 @@ var (
 )
 
 func InitNATS(ctx context.Context, logger *zap.Logger, cfg *config.Config) (*NATSConn, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	opts := []nats.Option{
 		nats.ReconnectWait(2 * time.Second),
 		nats.MaxReconnects(-1),
@@ -45,15 +44,14 @@ func InitNATS(ctx context.Context, logger *zap.Logger, cfg *config.Config) (*NAT
 	natsurl := fmt.Sprintf("nats://%s:%s", cfg.NATSHost, cfg.NATSPort)
 	conn, err := nats.Connect(natsurl, opts...)
 	return &NATSConn{Conn: conn, logger: logger}, err
-
 }
 
 func (nc *NATSConn) DrainNATS() {
-	err := nc.Conn.Drain()
+	err := nc.Drain()
 	if err != nil {
 		nc.logger.Error("Failed to drain NATS connection", zap.Error(err))
 	}
-	nc.Conn.Close()
+	nc.Close()
 }
 
 type JetStreamAdapter struct {
@@ -159,7 +157,7 @@ func (r *JetStreamAdapter) publishMsg(ctx context.Context, subject, streamName s
 	return nil
 }
 
-func (r *JetStreamAdapter) publishToDLQ(ctx context.Context, originalMsg jetstream.Msg, reason string, id int) error {
+func (r *JetStreamAdapter) publishToDLQ(ctx context.Context, originalMsg jetstream.Msg, reason string, id uint64) error {
 
 	subject := originalMsg.Subject()
 	msg := nats.Msg{
@@ -167,7 +165,7 @@ func (r *JetStreamAdapter) publishToDLQ(ctx context.Context, originalMsg jetstre
 		Subject: subject,
 		Header: nats.Header{
 			"original_subject": {subject},
-			"original_msg_id":  {string(id)},
+			"original_msg_id":  {strconv.FormatUint(id, 10)},
 			"Failure-Reason":   {reason},
 			"Timestamp":        {time.Now().UTC().Format(time.RFC3339)},
 		},

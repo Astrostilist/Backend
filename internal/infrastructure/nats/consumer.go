@@ -41,18 +41,22 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 					zap.String("consumer", consumerName),
 					zap.String("subject", msg.Subject()),
 					zap.String("error", err.Error()))
-				attempt := 1
-				id := -1
+				attempt := uint64(1)
+				id := uint64(0)
 				if meta, err := msg.Metadata(); err != nil {
-					attempt = int(meta.NumDelivered)
-					id = int(meta.Sequence.Stream)
+					attempt = meta.NumDelivered
+					id = meta.Sequence.Stream
 				}
 				if isPermanentError(err) || attempt >= models.MsgSMaxRetries {
 					if dlqErr := c.sm.publishToDLQ(ctx, msg, err.Error(), id); dlqErr != nil {
 						c.sm.logger.Error("Failed to send to DLQ",
 							zap.String("error", dlqErr.Error()))
+					} else {
+						if err = msg.Ack(); err != nil {
+							c.sm.logger.Error("Failed to ack original message sent to DLQ",
+								zap.String("error", err.Error()))
+						}
 					}
-					msg.Ack()
 				} else {
 					c.sm.logger.Info("Temporary error, allowing redelivery", zap.String("consumer", consumerName))
 					// длительность задержки игнорируется, т к приоритет у настроек стрима,
@@ -65,8 +69,8 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 						c.sm.logger.Error("Message negative acknowledged",
 							zap.String("consumer", consumerName),
 							zap.String("subject", msg.Subject()),
-							zap.Int("msg_id", id),
-							zap.Int("attempt", attempt),
+							zap.Uint64("msg_id", id),
+							zap.Uint64("attempt", attempt),
 							zap.Any("next_delay", backOff[delayId]),
 							zap.Error(err))
 					}

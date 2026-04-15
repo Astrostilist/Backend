@@ -44,7 +44,7 @@ func (r *MsgRouter) Dispatch(ctx context.Context, subject string, data []byte) e
 
 	handler, ok := r.handlers[subject]
 	if !ok {
-		return fmt.Errorf("No handler found for subject: %s", subject)
+		return fmt.Errorf("no handler found for subject: %s", subject)
 	}
 
 	r.logger.Debug("Dispatching message", zap.String("subject", subject))
