@@ -1,42 +1,38 @@
 package handlers
 
 import (
+	"astroapi/internal/database"
 	"encoding/json"
 	"net/http"
-
-	"astroapi/internal/database"
 )
 
+// Response остается без изменений
 type Response struct {
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
 
-// HelloWorldHandler обрабатывает GET запрос на /api/v1/
-func HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
-	// Проверяем только GET метод
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+// Создаем интерфейс для сервисного слоя
+type HelloService interface {
+	GetDBStatus() string
+}
 
-	// Проверяем подключение к БД
-	var dbStatus string
-	if database.DB != nil {
-		if err := database.DB.Ping(); err == nil {
-			dbStatus = "connected"
-		} else {
-			dbStatus = "disconnected"
-		}
-	} else {
-		dbStatus = "not initialized"
-	}
+// Создаем структуру хендлера, которая хранит сервис
+type HelloHandler struct {
+	service HelloService
+}
 
-	// Устанавливаем заголовок Content-Type
+// Конструктор для создания нового хендлера
+func NewHelloHandler(s HelloService) *HelloHandler {
+	return &HelloHandler{service: s}
+}
+
+func (h *HelloHandler) HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
+	dbStatus := h.service.GetDBStatus()
+
 	w.Header().Set("Content-Type", "application/json")
 
-	// Создаем ответ
 	response := Response{
 		Message: "Hello world",
 		Data: map[string]any{
@@ -44,9 +40,21 @@ func HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	// Кодируем в JSON и отправляем
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
+}
+
+type RealHelloService struct{}
+
+func (s *RealHelloService) GetDBStatus() string {
+	if database.DB != nil {
+		if err := database.DB.Ping(); err == nil {
+			return "connected"
+		} else {
+			return "disconnected"
+		}
+	}
+	return "not initialized"
 }

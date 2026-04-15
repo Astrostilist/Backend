@@ -13,7 +13,6 @@ import (
 	"astroapi/config"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
-
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 
@@ -56,7 +55,7 @@ func main() {
 		}
 	}()
 
-	// Инициализируем NATS
+	// Инициализируем NATS (продвинутая настройка из dev)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opts := []nats.Option{
@@ -90,14 +89,14 @@ func main() {
 		logger.Fatal("Failed to create JetStream context", zap.Error(err))
 	}
 
-	// Dependency injection
+	// Dependency injection для NATS стримов
 	streamRepo := natsinfra.NewJetStreamRepository(js)
 	streamUC := usecases.NewStreamUseCase(streamRepo)
 	streamManager := natsadapter.NewStreamManager(streamUC, logger)
 
 	// Инициализируем стримы
-	jsctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	jsctx, cancelInit := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelInit()
 	if err := streamManager.Initialize(jsctx); err != nil {
 		logger.Fatal("Failed to initialize streams", zap.Error(err))
 	}
@@ -106,25 +105,33 @@ func main() {
 	if err := database.InitDB(cfg); err != nil {
 		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
-
 	defer func() {
 		if err := database.DB.Close(); err != nil {
 			logger.Error("Error closing database connection", zap.Error(err))
 		}
 	}()
 
+	// Инициализируем репозитории и сервисы (DI)
 	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
 
-	// Настраиваем маршруты
+	helloService := &handlers.RealHelloService{}
+	helloHandler := handlers.NewHelloHandler(helloService)
+
+	// Настраиваем роутер chi и middleware (единый блок)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(astromidware.RequestLogger(logger))
 	r.Use(middleware.Recoverer)
-	r.Get("/api/v1/", handlers.HelloWorldHandler)
+
+	// Регистрируем ВСЕ маршруты
+	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
+	r.Post("/api/v1/astro/profile", handlers.ProfileHandler)
+	r.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
+
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 
-	// Создаем HTTP сервер с таймаутами
+	// Создаем HTTP сервер
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,
@@ -148,8 +155,8 @@ func main() {
 
 	logger.Info("Shutting down server...")
 
-	downctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	downctx, cancelDown := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelDown()
 
 	if err := srv.Shutdown(downctx); err != nil {
 		logger.Fatal("Server forced to shutdown", zap.Error(err))
