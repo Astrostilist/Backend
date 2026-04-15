@@ -10,26 +10,23 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/joho/godotenv"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+	"github.com/pressly/goose/v3"
+	"go.uber.org/zap"
+
 	"astroapi/config"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
-
 	natsadapter "astroapi/internal/nats"
 	natsinfra "astroapi/internal/repositories/nats"
-
 	"astroapi/internal/rules"
 	"astroapi/internal/usecases"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/joho/godotenv"
-
-	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
-
-	"go.uber.org/zap"
 )
 
 func main() {
@@ -124,12 +121,23 @@ func main() {
 	r.Use(astromidware.RequestLogger(logger))
 	r.Use(middleware.Recoverer)
 
+	if err := goose.SetDialect("postgres"); err != nil {
+    log.Fatal("Failed to set goose dialect:", err)
+	}
+	
+	if err := goose.Up(database.DB.DB, "./migrations"); err != nil {
+    log.Fatal("Failed to apply migrations:", err)
+	}
+	log.Println("Migrations applied")
+
 	// Регистрируем ВСЕ маршруты
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 	r.Post("/api/v1/astro/profile", handlers.ProfileHandler)
 	r.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
+  r.Post("/api/v1/admin/catalog/import", handlers.ImportCatalogHandler)
 
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
+
 
 	// Создаем HTTP сервер
 	srv := &http.Server{
