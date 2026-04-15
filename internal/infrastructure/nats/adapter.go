@@ -2,6 +2,7 @@ package nats
 
 import (
 	"astroapi/config"
+	"astroapi/internal/models"
 	"context"
 	"fmt"
 	"time"
@@ -15,14 +16,6 @@ type NATSConn struct {
 	*nats.Conn
 	logger *zap.Logger
 }
-
-const (
-	streamEvents = "astro_events"
-	streamDLQ    = "astro_dlq"
-	profileWrk   = "astro-profile-worker"
-	recommendWrk = "astro-recommend-worker"
-	maxRetries   = 5
-)
 
 var (
 	backOff = [4]time.Duration{
@@ -87,7 +80,7 @@ func (r *JetStreamAdapter) InitializeStreams(ctx context.Context) error {
 func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 	streamsCfg := []jetstream.StreamConfig{
 		{
-			Name:         streamEvents,
+			Name:         models.MsgStreamEvents,
 			Retention:    jetstream.WorkQueuePolicy,
 			Subjects:     []string{"astro.events.>"},
 			MaxConsumers: -1,
@@ -98,7 +91,7 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 			Replicas:     1,
 		},
 		{
-			Name:         streamDLQ,
+			Name:         models.MsgStreamDLQ,
 			Retention:    jetstream.LimitsPolicy,
 			Subjects:     []string{"astro.dlq.>"},
 			MaxConsumers: -1,
@@ -118,22 +111,24 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 
 	consumersCfg := []jetstream.ConsumerConfig{
 		{
-			Name:          profileWrk,
-			AckPolicy:     jetstream.AckExplicitPolicy,
-			MaxDeliver:    maxRetries,
-			ReplayPolicy:  jetstream.ReplayInstantPolicy,
-			AckWait:       time.Duration(30 * time.Second),
-			MaxAckPending: 1000,
-			BackOff:       backOff[:],
+			Name:           models.MsgProfileWrk,
+			FilterSubjects: []string{fmt.Sprint(models.MsgProfileSubj, ".>")},
+			AckPolicy:      jetstream.AckExplicitPolicy,
+			MaxDeliver:     models.MsgSMaxRetries,
+			ReplayPolicy:   jetstream.ReplayInstantPolicy,
+			AckWait:        time.Duration(30 * time.Second),
+			MaxAckPending:  1000,
+			BackOff:        backOff[:],
 		},
 		{
-			Name:          recommendWrk,
-			AckPolicy:     jetstream.AckExplicitPolicy,
-			MaxDeliver:    maxRetries,
-			ReplayPolicy:  jetstream.ReplayInstantPolicy,
-			AckWait:       time.Duration(30 * time.Second),
-			MaxAckPending: 1000,
-			BackOff:       backOff[:],
+			Name:           models.MsgRecommendWrk,
+			FilterSubjects: []string{fmt.Sprint(models.MsgRecommendSubj, ".>")},
+			AckPolicy:      jetstream.AckExplicitPolicy,
+			MaxDeliver:     models.MsgSMaxRetries,
+			ReplayPolicy:   jetstream.ReplayInstantPolicy,
+			AckWait:        time.Duration(30 * time.Second),
+			MaxAckPending:  1000,
+			BackOff:        backOff[:],
 		},
 	}
 
@@ -181,7 +176,7 @@ func (r *JetStreamAdapter) publishToDLQ(ctx context.Context, originalMsg jetstre
 	pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	ack, err := r.PublishMsg(pubCtx, &msg, jetstream.WithExpectStream(streamDLQ))
+	ack, err := r.PublishMsg(pubCtx, &msg, jetstream.WithExpectStream(models.MsgStreamDLQ))
 	if err != nil {
 		r.logger.Error("Failed to publish to DLQ",
 			zap.String("subject", subject),

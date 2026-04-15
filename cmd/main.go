@@ -13,6 +13,7 @@ import (
 	"astroapi/config"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
+	"astroapi/internal/models"
 
 	natsinfra "astroapi/internal/infrastructure/nats"
 
@@ -90,13 +91,13 @@ func main() {
 	}()
 
 	// Адаптер для публикации исходящих сообщений в NATS
-	// TODO: подключить в соответствующие хэндлеры
+	// TODO: подключить в соответствующие API-endpoint хэндлеры
 	_ = natsinfra.NewMessagePublisher(jsadapter, logger)
 
 	// Роутер обработки входящих сообщений
 	msgRouter := handlers.NewMsgRouter(logger)
-	msgRouter.Register("astro.events.recommend", handlers.HandlerFunc(handlers.HandleRecommend))
-	msgRouter.Register("astro.events.profile", handlers.HandlerFunc(handlers.HandleProfile))
+	msgRouter.Register(models.MsgRecommendSubj, handlers.HandlerFunc(handlers.HandleRecommend))
+	msgRouter.Register(models.MsgProfileSubj, handlers.HandlerFunc(handlers.HandleProfile))
 
 	consumer := natsinfra.NewMessageConsumer(jsadapter, logger)
 
@@ -104,8 +105,8 @@ func main() {
 	// Запускаем два воркера в отдельных горутинах
 	wg.Go(func() {
 		err := consumer.ConsumeWithHandler(jsctx,
-			"astro.events",
-			"astro-profile-worker",
+			models.MsgStreamEvents,
+			models.MsgProfileWrk,
 			func(ctx context.Context, msg jetstream.Msg) error {
 				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
 			})
@@ -116,8 +117,8 @@ func main() {
 
 	wg.Go(func() {
 		err := consumer.ConsumeWithHandler(jsctx,
-			"astro.events",
-			"astro-recommend-worker",
+			models.MsgStreamEvents,
+			models.MsgRecommendWrk,
 			func(ctx context.Context, msg jetstream.Msg) error {
 				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
 			})

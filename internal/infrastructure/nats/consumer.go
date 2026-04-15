@@ -1,6 +1,7 @@
 package nats
 
 import (
+	"astroapi/internal/models"
 	"context"
 	"fmt"
 
@@ -46,7 +47,7 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 					attempt = int(meta.NumDelivered)
 					id = int(meta.Sequence.Stream)
 				}
-				if isPermanentError(err) || attempt >= maxRetries {
+				if isPermanentError(err) || attempt >= models.MsgSMaxRetries {
 					if dlqErr := c.sm.publishToDLQ(ctx, msg, err.Error(), id); dlqErr != nil {
 						c.sm.logger.Error("Failed to send to DLQ",
 							zap.String("error", dlqErr.Error()))

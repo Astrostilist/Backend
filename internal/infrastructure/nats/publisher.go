@@ -1,6 +1,7 @@
 package nats
 
 import (
+	"astroapi/internal/models"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,7 +21,7 @@ func NewMessagePublisher(js *JetStreamAdapter, logger *zap.Logger) *MessagePubli
 
 func (p *MessagePublisher) PublishMessage(ctx context.Context, streamName, subject string, payload any) error {
 
-	if streamName == streamDLQ {
+	if streamName == models.MsgStreamDLQ {
 		return fmt.Errorf("publish failed: wrong stream name '%s'", streamName)
 	}
 	data, err := json.Marshal(payload)
