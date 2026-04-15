@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -14,26 +14,26 @@ import (
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
 
+	natsinfra "astroapi/internal/infrastructure/nats"
+
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 
-	natsadapter "astroapi/internal/nats"
-	natsinfra "astroapi/internal/repositories/nats"
-
 	"astroapi/internal/rules"
-	"astroapi/internal/usecases"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
 
-	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"go.uber.org/zap"
 )
 
 func main() {
+
+	ctx := context.Background()
+
 	// Загружаем переменные из .env файла
 	if err := godotenv.Load(); err != nil {
 		log.Println("Warning: .env file not found, using system environment variables")
@@ -57,48 +57,24 @@ func main() {
 	}()
 
 	// Инициализируем NATS
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	opts := []nats.Option{
-		nats.ReconnectWait(2 * time.Second),
-		nats.MaxReconnects(-1),
-		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-			logger.Info("Disconnected from NATS", zap.Error(err))
-		}),
-		nats.ReconnectHandler(func(nc *nats.Conn) {
-			logger.Info("Reconnected to NATS", zap.String("url", nc.ConnectedUrl()))
-		}),
-		nats.ClosedHandler(func(nc *nats.Conn) {
-			logger.Info("NATS connection closed")
-		}),
-	}
-	natsurl := fmt.Sprintf("nats://%s:%s", cfg.NATSHost, cfg.NATSPort)
-	nc, err := nats.Connect(natsurl, opts...)
+	nc, err := natsinfra.InitNATS(ctx, logger, cfg)
 	if err != nil {
 		logger.Fatal("Failed to connect to NATS", zap.Error(err))
-	}
-	defer func() {
-		err := nc.Drain()
-		if err != nil {
-			logger.Error("Failed to drain NATS connection", zap.Error(err))
-		}
-		nc.Close()
-	}()
 
-	js, err := jetstream.New(nc)
+	}
+	defer nc.DrainNATS()
+
+	js, err := jetstream.New(nc.Conn)
 	if err != nil {
 		logger.Fatal("Failed to create JetStream context", zap.Error(err))
 	}
 
-	// Dependency injection
-	streamRepo := natsinfra.NewJetStreamRepository(js)
-	streamUC := usecases.NewStreamUseCase(streamRepo)
-	streamManager := natsadapter.NewStreamManager(streamUC, logger)
+	jsadapter := natsinfra.NewJetStreamRepository(js, logger)
 
 	// Инициализируем стримы
-	jsctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := streamManager.Initialize(jsctx); err != nil {
+	jsctx, jscancel := context.WithTimeout(ctx, 10*time.Second)
+	defer jscancel()
+	if err := jsadapter.InitializeStreams(jsctx); err != nil {
 		logger.Fatal("Failed to initialize streams", zap.Error(err))
 	}
 
@@ -112,6 +88,43 @@ func main() {
 			logger.Error("Error closing database connection", zap.Error(err))
 		}
 	}()
+
+	// Адаптер для публикации исходящих сообщений в NATS
+	// TODO: подключить в соответствующие хэндлеры
+	_ = natsinfra.NewMessagePublisher(jsadapter, logger)
+
+	// Роутер обработки входящих сообщений
+	msgRouter := handlers.NewMsgRouter(logger)
+	msgRouter.Register("astro.events.recommend", handlers.HandlerFunc(handlers.HandleRecommend))
+	msgRouter.Register("astro.events.profile", handlers.HandlerFunc(handlers.HandleProfile))
+
+	consumer := natsinfra.NewMessageConsumer(jsadapter, logger)
+
+	wg := sync.WaitGroup{}
+	// Запускаем два воркера в отдельных горутинах
+	wg.Go(func() {
+		err := consumer.ConsumeWithHandler(jsctx,
+			"astro.events",
+			"astro-profile-worker",
+			func(ctx context.Context, msg jetstream.Msg) error {
+				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
+			})
+		if err != nil {
+			logger.Error("Profile worker failed", zap.String("error", err.Error()))
+		}
+	})
+
+	wg.Go(func() {
+		err := consumer.ConsumeWithHandler(jsctx,
+			"astro.events",
+			"astro-recommend-worker",
+			func(ctx context.Context, msg jetstream.Msg) error {
+				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
+			})
+		if err != nil {
+			logger.Error("Recommend worker failed", zap.String("error", err.Error()))
+		}
+	})
 
 	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
@@ -157,6 +170,9 @@ func main() {
 			logger.Fatal("Server forced close error", zap.Error(closeErr))
 		}
 	}
+
+	jscancel() // стопаем консьюмеры
+	wg.Wait()
 
 	logger.Info("Server exited")
 }
