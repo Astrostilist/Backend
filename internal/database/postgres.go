@@ -8,6 +8,7 @@ import (
 	"astroapi/config"
 
 	_ "github.com/lib/pq"
+	"github.com/pressly/goose"
 )
 
 type PostgresDB struct {
@@ -32,6 +33,10 @@ func InitDB(cfg *config.Config) error {
 	// Проверяем подключение
 	if err := db.Ping(); err != nil {
 		return fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	if err := goose.Up(db, "migrations"); err != nil {
+		panic(err)
 	}
 
 	DB = &PostgresDB{DB: db}
