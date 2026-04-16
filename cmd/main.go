@@ -1,6 +1,7 @@
 package main
 
 import (
+	"astroapi/internal/repositories"
 	"context"
 	"fmt"
 	"log"
@@ -115,6 +116,9 @@ func main() {
 	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
 
+	feedbackRepo := repositories.NewFeedbackRepository(database.DB.DB)
+	feedbackHandler := handlers.NewFeedbackHandler(feedbackRepo)
+
 	helloService := &handlers.RealHelloService{}
 	helloHandler := handlers.NewHelloHandler(helloService)
 
@@ -128,6 +132,7 @@ func main() {
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 	r.Post("/api/v1/astro/profile", handlers.ProfileHandler)
 	r.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
+	r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
 
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 
