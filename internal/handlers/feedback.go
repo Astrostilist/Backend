@@ -87,5 +87,7 @@ func (h *FeedbackHandler) CreateFeedback(w http.ResponseWriter, r *http.Request)
 	// Возвращаем 201 Created
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"status": "success", "message": "Отзыв успешно сохранен"}`))
+	if _, err := w.Write([]byte(`{"status": "success", "message": "Отзыв успешно сохранен"}`)); err != nil {
+		return
+	}
 }
