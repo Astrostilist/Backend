@@ -20,6 +20,7 @@ require (
 )
 
 require (
+	github.com/pressly/goose v2.7.0+incompatible
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/nats v0.41.0

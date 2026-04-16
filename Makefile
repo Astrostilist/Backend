@@ -1,8 +1,9 @@
-.PHONY: build lint test run clean help
+.PHONY: build lint test run clean help generate-key
 
 BINARY_NAME=astro-backend
 BUILD_DIR=bin
 CMD_PATH=cmd/main.go
+ENV_FILE=.env
 
 deps:
 	@echo "Installing development"
@@ -16,11 +17,21 @@ generate-mocks:
 	@echo ""
 	@echo "TODO: Add specific mockgen commands when interfaces are defined in packages"
 	@echo "Ready to generate mocks for future interfaces"
+	
+generate-key:
+	@if ! grep -q "^ENCRYPTION_KEY=" $(ENV_FILE); then \
+		KEY=$$(head -c 32 /dev/urandom | base64 | tr -d '\n'); \
+		printf "ENCRYPTION_KEY=%s\n" "$$KEY" >> $(ENV_FILE); \
+		echo "ENCRYPTION_KEY added to $(ENV_FILE)"; \
+	else \
+		echo "ENCRYPTION_KEY already exists in $(ENV_FILE)"; \
+	fi
 
 help:
 	@echo "Available targets:"
 	@echo "  deps           - Install development dependencies (mockgen)"
 	@echo "  generate-mocks - Generate mocks for interfaces"
+	@echo "  generate-key   - Generate ENCRYPTION_KEY (base64, 32 bytes) in .env file"
 	@echo "  build          - Build the application"
 	@echo "  lint           - Run golangci-lint"
 	@echo "  test           - Run tests with verbose output"

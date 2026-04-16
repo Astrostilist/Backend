@@ -3,6 +3,7 @@ package main
 import (
 	"astroapi/internal/repositories"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
@@ -38,6 +39,18 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("Warning: .env file not found, using system environment variables")
 	}
+
+	//Паникуем при отсутвие ключа
+	encodedKey := os.Getenv("ENCRYPTION_KEY")
+	if encodedKey == "" {
+		log.Fatal("ENCRYPTION_KEY is not set")
+	}
+	//Декодируем из base64
+	key, err := base64.StdEncoding.DecodeString(encodedKey)
+	if err != nil {
+		log.Fatal("Invalid base64 key:", err)
+	}
+	_ = key
 
 	cfg := config.Load()
 
