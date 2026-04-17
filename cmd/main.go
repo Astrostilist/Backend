@@ -68,8 +68,6 @@ func main() {
 		}
 	}()
 
-	zap.ReplaceGlobals(logger)
-
 	// Инициализируем NATS (продвинутая настройка из dev)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
