@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -107,7 +108,7 @@ func (c *Client) doRequest(ctx context.Context, requestBody ChatCompletionReques
 	return "", err
 }
 
-func (c *Client) send(ctx context.Context, requestBody ChatCompletionRequest) (string, error) {
+func (c *Client) send(ctx context.Context, requestBody ChatCompletionRequest) (text string, err error) {
 	payload, err := json.Marshal(requestBody)
 	if err != nil {
 		return "", fmt.Errorf("marshal AlisaAI request: %w", err)
@@ -128,6 +129,7 @@ func (c *Client) send(ctx context.Context, requestBody ChatCompletionRequest) (s
 	defer func() {
 		errClose := response.Body.Close()
 		if errClose != nil {
+			err = errors.Join(err, fmt.Errorf("close AlisaAI response body: %w", errClose))
 		}
 	}()
 
@@ -149,7 +151,7 @@ func (c *Client) send(ctx context.Context, requestBody ChatCompletionRequest) (s
 		return "", fmt.Errorf("decode AlisaAI response: %w", err)
 	}
 
-	text := extractResponseText(decoded)
+	text = extractResponseText(decoded)
 	if strings.TrimSpace(text) == "" {
 		return "", fmt.Errorf("AlisaAI response is empty")
 	}
