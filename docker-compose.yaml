@@ -9,7 +9,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      # - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -58,7 +58,11 @@ services:
       - nats-data:/data
       - ./docker/nats/nats-server.conf:/etc/nats/nats-server.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz?js-enabled-only=true >/dev/null 2>&1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://localhost:8222/healthz?js-enabled-only=true >/dev/null 2>&1",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
