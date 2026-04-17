@@ -125,7 +125,11 @@ func (c *Client) send(ctx context.Context, requestBody ChatCompletionRequest) (s
 	if err != nil {
 		return "", fmt.Errorf("send AlisaAI request: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		errClose := response.Body.Close()
+		if errClose != nil {
+		}
+	}()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
