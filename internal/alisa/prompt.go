@@ -92,9 +92,9 @@ func loadPromptTemplates() *template.Template {
 func templateNameByScenario(scenario string) string {
 	switch scenario {
 	case scenarioPersonalStyle:
-		return "prompts/personal_style.tmpl"
+		return "personal_style.tmpl"
 	case scenarioPerfectGift:
-		return "prompts/perfect_gift.tmpl"
+		return "perfect_gift.tmpl"
 	default:
 		return ""
 	}
