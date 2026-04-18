@@ -145,6 +145,9 @@ func main() {
 	helloService := &handlers.RealHelloService{}
 	helloHandler := handlers.NewHelloHandler(helloService)
 
+	dlqreader := natsinfra.NewDLQReader(jsadapter, logger)
+	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqreader, logger)
+
 	// Настраиваем роутер chi и middleware (единый блок)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -155,6 +158,11 @@ func main() {
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 	r.Post("/api/v1/astro/profile", handlers.ProfileHandler)
 	r.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
+
+	r.Group(func(r chi.Router) {
+		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))
+		r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
+	})
 
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 

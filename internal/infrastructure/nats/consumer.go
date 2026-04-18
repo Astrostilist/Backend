@@ -3,6 +3,7 @@ package nats
 import (
 	"astroapi/internal/models"
 	"context"
+	"errors"
 	"fmt"
 
 	"time"
@@ -15,8 +16,16 @@ type MessageConsumer struct {
 	sm *JetStreamAdapter
 }
 
+type DLQReader struct {
+	sm *JetStreamAdapter
+}
+
 func NewMessageConsumer(js *JetStreamAdapter, logger *zap.Logger) *MessageConsumer {
 	return &MessageConsumer{sm: js}
+}
+
+func NewDLQReader(js *JetStreamAdapter, logger *zap.Logger) *DLQReader {
+	return &DLQReader{sm: js}
 }
 
 func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, consumerName string,
@@ -100,6 +109,50 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 	}()
 
 	return nil
+}
+
+func (d *DLQReader) GetMessages(ctx context.Context) ([]models.Message, error) {
+
+	var consumer jetstream.Consumer
+	var err error
+
+	stream, err := d.sm.Stream(ctx, models.MsgStreamDLQ)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stream '%s': %w", models.MsgStreamDLQ, err)
+	}
+
+	consumer, err = stream.Consumer(ctx, models.MsgDQLViewer)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrConsumerNotFound) {
+			consumer, err = d.sm.initDLQConsumer(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create consumer %s: %w", models.MsgDQLViewer, err)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to get consumer %s: %w", models.MsgDQLViewer, err)
+		}
+	}
+
+	messages, err := consumer.Fetch(50, jetstream.FetchMaxWait(15*time.Second))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get messages: %w", err)
+	}
+	if messages.Error() != nil {
+		return nil, fmt.Errorf("failed to get messages: %w", messages.Error())
+	}
+
+	var res []models.Message
+	msgChan := messages.Messages()
+	for msg := range msgChan {
+		r := models.Message{
+			Subject: msg.Subject(),
+			Headers: msg.Headers(),
+			Data:    msg.Data(),
+		}
+		res = append(res, r)
+	}
+
+	return res, nil
 }
 
 func isPermanentError(err error) bool {

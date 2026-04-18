@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"astroapi/internal/models"
 	"context"
 	"fmt"
 
@@ -19,6 +20,10 @@ type MsgRouter struct {
 // MsgPublisher - интерфейс для отправки сообщений
 type MsgPublisher interface {
 	PublishMessage(ctx context.Context, streamName, subject string, payload any) error
+}
+
+type MsgDLQReader interface {
+	GetMessages(ctx context.Context) ([]models.Message, error)
 }
 
 type HandlerFunc func(ctx context.Context, payload []byte) error
