@@ -104,7 +104,8 @@ func main() {
 
 	// Адаптер для публикации исходящих сообщений в NATS
 	// TODO: подключить в соответствующие API-endpoint хэндлеры
-	_ = natsinfra.NewMessagePublisher(jsadapter, logger)
+	jsPublisher := natsinfra.NewMessagePublisher(jsadapter, logger)
+	profileHandler := handlers.NewProfileHandler(jsPublisher)
 
 	// Роутер обработки входящих сообщений
 	msgRouter := handlers.NewMsgRouter(logger)
@@ -153,7 +154,7 @@ func main() {
 
 	// Регистрируем ВСЕ маршруты
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
-	r.Post("/api/v1/astro/profile", handlers.ProfileHandler)
+	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
 	r.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
 
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
