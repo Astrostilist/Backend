@@ -147,7 +147,7 @@ func (d *DLQReader) GetMessages(ctx context.Context) ([]models.Message, error) {
 		r := models.Message{
 			Subject: msg.Subject(),
 			Headers: msg.Headers(),
-			Data:    msg.Data(),
+			Data:    string(msg.Data()),
 		}
 		res = append(res, r)
 	}

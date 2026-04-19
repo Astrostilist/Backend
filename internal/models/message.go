@@ -14,5 +14,5 @@ const (
 type Message struct {
 	Subject string              `json:"subject"`
 	Headers map[string][]string `json:"headers"`
-	Data    []byte              `json:"data"`
+	Data    string              `json:"data"`
 }
