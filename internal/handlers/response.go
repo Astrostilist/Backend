@@ -12,7 +12,6 @@ func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
 	w.WriteHeader(statusCode)
-
 }
 
 func writeError(w http.ResponseWriter, statusCode int, message string) {
