@@ -133,7 +133,7 @@ func (d *DLQReader) GetMessages(ctx context.Context) ([]models.Message, error) {
 		}
 	}
 
-	messages, err := consumer.Fetch(50, jetstream.FetchMaxWait(15*time.Second))
+	messages, err := consumer.Fetch(50, jetstream.FetchMaxWait(2*time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get messages: %w", err)
 	}
@@ -141,7 +141,7 @@ func (d *DLQReader) GetMessages(ctx context.Context) ([]models.Message, error) {
 		return nil, fmt.Errorf("failed to get messages: %w", messages.Error())
 	}
 
-	var res []models.Message
+	res := []models.Message{}
 	msgChan := messages.Messages()
 	for msg := range msgChan {
 		r := models.Message{

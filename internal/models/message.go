@@ -12,7 +12,7 @@ const (
 )
 
 type Message struct {
-	Subject string
-	Headers map[string][]string
-	Data    []byte
+	Subject string              `json:"subject"`
+	Headers map[string][]string `json:"headers"`
+	Data    []byte              `json:"data"`
 }
