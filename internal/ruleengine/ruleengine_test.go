@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"log"
-	"os"
+	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/pressly/goose"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"gotest.tools/assert"
@@ -68,7 +68,7 @@ func TestMatch(t *testing.T) {
 	ctr, err := postgres.Run(
 		ctx,
 		"postgres:17-alpine",
-		//	postgres.WithInitScripts(filepath.Join("testdata", "setup.sql")),
+		postgres.WithInitScripts(filepath.Join("testdata", "setup.sql")),
 		postgres.WithDatabase(dbName),
 		postgres.WithUsername(dbUser),
 		postgres.WithPassword(DBPassword),
@@ -92,21 +92,13 @@ func TestMatch(t *testing.T) {
 			log.Printf("failed to close db: %v", err)
 		}
 	}()
-
-	err = goose.Up(db, "../../migrations")
-	require.NoError(t, err)
-
-	script, err := os.ReadFile("./testdata/setup.sql")
-	require.NoError(t, err)
-	_, err = db.Exec(string(script))
-	require.NoError(t, err)
-
-	r := RulesModel{db}
-
+	r := PostgresRepository{db}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			list, err := r.Match(tt.triggers)
+			list, err := r.Match(ctx, tt.triggers)
 			assert.NilError(t, err)
 			if !slices.Equal(list, tt.want) {
 				t.Errorf("slices are not equal: \n\tWanted: %v . But get: %v", tt.want, list)

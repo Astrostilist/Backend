@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"astroapi/internal/rules"
+	rules "astroapi/internal/ruleengine"
 
 	"github.com/go-chi/chi/v5"
 )

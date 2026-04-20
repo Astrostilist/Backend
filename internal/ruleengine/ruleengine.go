@@ -2,21 +2,14 @@ package ruleengine
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"log"
-	"time"
 
 	"github.com/lib/pq"
 )
 
-// RulesModel - инкапсулирует пул соединений БД.
-type RulesModel struct {
-	DB *sql.DB
-}
-
 // Match - возвращает уникальный список тегов по активным правилам, отсортированным по priority ASC
-func (r RulesModel) Match(triggers []string) ([]string, error) {
+func (r *PostgresRepository) Match(ctx context.Context, triggers []string) ([]string, error) {
 	if len(triggers) == 0 {
 		return []string{}, nil
 	}
@@ -30,13 +23,10 @@ func (r RulesModel) Match(triggers []string) ([]string, error) {
 	ORDER BY priority ASC
 	`
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
 	uniqueTags := make([]string, 0)
 	tags := make(map[string]int)
 
-	rows, err := r.DB.QueryContext(ctx, query, is_active, pq.Array(triggers))
+	rows, err := r.db.QueryContext(ctx, query, is_active, pq.Array(triggers))
 	if err != nil {
 		return nil, err
 	}
