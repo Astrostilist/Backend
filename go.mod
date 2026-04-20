@@ -8,6 +8,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.12.3
 	github.com/nats-io/nats.go v1.50.0
+	github.com/pressly/goose v2.7.0+incompatible
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.41.0
