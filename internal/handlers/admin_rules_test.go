@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"astroapi/internal/rules"
+	rules "astroapi/internal/ruleengine"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -100,7 +100,10 @@ func (r *fakeRulesRepository) Deactivate(_ context.Context, id string) (rules.Ru
 
 	return currentRule, nil
 }
+func (r *fakeRulesRepository) Match(_ context.Context, tags []string) ([]string, error) {
 
+	return []string{}, nil
+}
 func newAdminRulesTestMux(repository rules.Repository) chi.Router {
 	router := chi.NewRouter()
 	RegisterAdminRulesRoutes(router, testAdminToken, NewAdminRulesHandler(repository))

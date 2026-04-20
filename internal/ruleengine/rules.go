@@ -1,4 +1,4 @@
-package rules
+package ruleengine
 
 import (
 	"context"
@@ -40,4 +40,5 @@ type Repository interface {
 	Create(ctx context.Context, input RuleInput) (Rule, error)
 	Update(ctx context.Context, id string, input RuleInput) (Rule, error)
 	Deactivate(ctx context.Context, id string) (Rule, error)
+	Match(ctx context.Context, triggers []string) ([]string, error)
 }
