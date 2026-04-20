@@ -68,8 +68,7 @@ func setupIntegrationEnv(ctx context.Context) (*TestEnv, error) {
 	env := &TestEnv{}
 
 	// --- NATS JetStream ---
-	natsContainer, err := nats.RunContainer(ctx,
-		testcontainers.WithImage("nats:alpine"),
+	natsContainer, err := nats.Run(ctx, "nats:alpine",
 		testcontainers.WithCmd("-js"),
 	)
 	if err != nil {
@@ -84,8 +83,7 @@ func setupIntegrationEnv(ctx context.Context) (*TestEnv, error) {
 	env.NatsURL = natsURL
 
 	// --- PostgreSQL ---
-	postgresContainer, err := postgres.RunContainer(ctx,
-		testcontainers.WithImage("postgres:17-alpine"),
+	postgresContainer, err := postgres.Run(ctx, "postgres:17-alpine",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("user"),
 		postgres.WithPassword("password"),

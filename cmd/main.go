@@ -2,41 +2,56 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"encoding/base64"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"astroapi/config"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
+	"astroapi/internal/models"
+
+	natsinfra "astroapi/internal/infrastructure/nats"
+
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 
-	natsadapter "astroapi/internal/nats"
-	natsinfra "astroapi/internal/repositories/nats"
-
 	"astroapi/internal/rules"
-	"astroapi/internal/usecases"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
 
-	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"go.uber.org/zap"
 )
 
 func main() {
+
+	ctx := context.Background()
+
 	// Загружаем переменные из .env файла
 	if err := godotenv.Load(); err != nil {
 		log.Println("Warning: .env file not found, using system environment variables")
 	}
+
+	//Паникуем при отсутвие ключа
+	encodedKey := os.Getenv("ENCRYPTION_KEY")
+	if encodedKey == "" {
+		log.Fatal("ENCRYPTION_KEY is not set")
+	}
+	//Декодируем из base64
+	key, err := base64.StdEncoding.DecodeString(encodedKey)
+	if err != nil {
+		log.Fatal("Invalid base64 key:", err)
+	}
+	_ = key
 
 	cfg := config.Load()
 
@@ -55,49 +70,25 @@ func main() {
 		}
 	}()
 
-	// Инициализируем NATS (продвинутая настройка из dev)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	opts := []nats.Option{
-		nats.ReconnectWait(2 * time.Second),
-		nats.MaxReconnects(-1),
-		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-			logger.Info("Disconnected from NATS", zap.Error(err))
-		}),
-		nats.ReconnectHandler(func(nc *nats.Conn) {
-			logger.Info("Reconnected to NATS", zap.String("url", nc.ConnectedUrl()))
-		}),
-		nats.ClosedHandler(func(nc *nats.Conn) {
-			logger.Info("NATS connection closed")
-		}),
-	}
-	natsurl := fmt.Sprintf("nats://%s:%s", cfg.NATSHost, cfg.NATSPort)
-	nc, err := nats.Connect(natsurl, opts...)
+	// Инициализируем NATS
+	nc, err := natsinfra.InitNATS(ctx, logger, cfg)
 	if err != nil {
 		logger.Fatal("Failed to connect to NATS", zap.Error(err))
-	}
-	defer func() {
-		err := nc.Drain()
-		if err != nil {
-			logger.Error("Failed to drain NATS connection", zap.Error(err))
-		}
-		nc.Close()
-	}()
 
-	js, err := jetstream.New(nc)
+	}
+	defer nc.DrainNATS()
+
+	js, err := jetstream.New(nc.Conn)
 	if err != nil {
 		logger.Fatal("Failed to create JetStream context", zap.Error(err))
 	}
 
-	// Dependency injection для NATS стримов
-	streamRepo := natsinfra.NewJetStreamRepository(js)
-	streamUC := usecases.NewStreamUseCase(streamRepo)
-	streamManager := natsadapter.NewStreamManager(streamUC, logger)
+	jsadapter := natsinfra.NewJetStreamRepository(js, logger)
 
 	// Инициализируем стримы
-	jsctx, cancelInit := context.WithTimeout(ctx, 10*time.Second)
-	defer cancelInit()
-	if err := streamManager.Initialize(jsctx); err != nil {
+	jsctx, jscancel := context.WithTimeout(ctx, 10*time.Second)
+	defer jscancel()
+	if err := jsadapter.InitializeStreams(jsctx); err != nil {
 		logger.Fatal("Failed to initialize streams", zap.Error(err))
 	}
 
@@ -111,7 +102,43 @@ func main() {
 		}
 	}()
 
-	// Инициализируем репозитории и сервисы (DI)
+	// Адаптер для публикации исходящих сообщений в NATS
+	// TODO: подключить в соответствующие API-endpoint хэндлеры
+	_ = natsinfra.NewMessagePublisher(jsadapter, logger)
+
+	// Роутер обработки входящих сообщений
+	msgRouter := handlers.NewMsgRouter(logger)
+	msgRouter.Register(models.MsgRecommendSubj, handlers.HandlerFunc(handlers.HandleRecommend))
+	msgRouter.Register(models.MsgProfileSubj, handlers.HandlerFunc(handlers.HandleProfile))
+
+	consumer := natsinfra.NewMessageConsumer(jsadapter, logger)
+
+	wg := sync.WaitGroup{}
+	// Запускаем два воркера в отдельных горутинах
+	wg.Go(func() {
+		err := consumer.ConsumeWithHandler(jsctx,
+			models.MsgStreamEvents,
+			models.MsgProfileWrk,
+			func(ctx context.Context, msg jetstream.Msg) error {
+				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
+			})
+		if err != nil {
+			logger.Error("Profile worker failed", zap.String("error", err.Error()))
+		}
+	})
+
+	wg.Go(func() {
+		err := consumer.ConsumeWithHandler(jsctx,
+			models.MsgStreamEvents,
+			models.MsgRecommendWrk,
+			func(ctx context.Context, msg jetstream.Msg) error {
+				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
+			})
+		if err != nil {
+			logger.Error("Recommend worker failed", zap.String("error", err.Error()))
+		}
+	})
+
 	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
 
@@ -164,6 +191,9 @@ func main() {
 			logger.Fatal("Server forced close error", zap.Error(closeErr))
 		}
 	}
+
+	jscancel() // стопаем консьюмеры
+	wg.Wait()
 
 	logger.Info("Server exited")
 }
