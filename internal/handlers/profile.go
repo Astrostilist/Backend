@@ -1,11 +1,11 @@
 package handlers
 
 import (
-	"astroapi/internal/models"
-	"context"
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"astroapi/internal/models"
 
 	"github.com/google/uuid"
 )
@@ -29,24 +29,19 @@ func (req *ProfileRequest) Validate() map[string]string {
 	return errors
 }
 
-// Создаем структуру хендлера с паблишером внутри
-type EventPublisher interface {
-	PublishMessage(ctx context.Context, streamName, subject string, payload any) error
-}
-
-// Заменяем жесткую привязку на интерфейс
+// 1. Используем готовый MsgPublisher
 type ProfileHandler struct {
-	publisher EventPublisher
+	publisher MsgPublisher
 }
 
-func NewProfileHandler(p EventPublisher) *ProfileHandler {
+func NewProfileHandler(p MsgPublisher) *ProfileHandler {
 	return &ProfileHandler{publisher: p}
 }
 
-// Метод обработки запроса
 func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		// 3. Используем Сашину функцию writeError
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -54,39 +49,30 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 
 	var req ProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error": "invalid json format"}`, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "invalid json format")
 		return
 	}
 
 	if validationErrors := req.Validate(); len(validationErrors) > 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		// 3. Используем Сашину функцию writeJSON для кастомного ответа с ошибками
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"error":   "validation_failed",
 			"details": validationErrors,
-		}); err != nil {
-			http.Error(w, "failed to encode response", http.StatusInternalServerError)
-		}
+		})
 		return
 	}
 
 	requestID := uuid.New().String()
 
-	// Отправляем сообщение
-	err := h.publisher.PublishMessage(r.Context(), models.MsgStreamEvents, "astro.events.profile", req)
+	// 2. Используем константу MsgProfileSubj
+	err := h.publisher.PublishMessage(r.Context(), models.MsgStreamEvents, models.MsgProfileSubj, req)
 	if err != nil {
-		http.Error(w, `{"error": "failed to publish event to NATS"}`, http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "failed to publish event to NATS")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-
-	if err := json.NewEncoder(w).Encode(map[string]string{
+	// 3. Используем writeJSON для успешного ответа
+	writeJSON(w, http.StatusAccepted, map[string]string{
 		"request_id": requestID,
-	}); err != nil {
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
-		return
-	}
+	})
 }

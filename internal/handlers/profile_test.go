@@ -10,13 +10,13 @@ import (
 	"testing"
 )
 
-// mockPublisher — это наша заглушка для тестов
-type mockPublisher struct {
-	err error // Ошибка, которую мы хотим сымитировать
+// Заглушка (мок) для тестов профиля
+type mockMsgPublisher struct {
+	err error
 }
 
-// Реализуем интерфейс EventPublisher
-func (m *mockPublisher) PublishMessage(ctx context.Context, streamName, subject string, payload any) error {
+// Реализуем командный интерфейс MsgPublisher, который написала Оля
+func (m *mockMsgPublisher) PublishMessage(ctx context.Context, streamName, subject string, payload any) error {
 	return m.err
 }
 
@@ -32,14 +32,12 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 			name:           "Method Not Allowed (GET)",
 			method:         http.MethodGet,
 			body:           nil,
-			mockPubErr:     nil,
 			expectedStatus: http.StatusMethodNotAllowed,
 		},
 		{
 			name:           "Invalid JSON (Body is wrong)",
 			method:         http.MethodPost,
-			body:           map[string]interface{}{"user_id": make(chan int)}, // Сломает JSON кодер
-			mockPubErr:     nil,
+			body:           nil, // Сформируем кривой JSON вручную ниже
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
@@ -51,7 +49,6 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 				"birth_place":   "Moscow",
 				"consent_given": true,
 			},
-			mockPubErr:     nil,
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
@@ -63,7 +60,7 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 				"birth_place":   "Moscow",
 				"consent_given": true,
 			},
-			mockPubErr:     errors.New("nats connection lost"), // Имитируем сбой NATS
+			mockPubErr:     errors.New("nats connection lost"),
 			expectedStatus: http.StatusInternalServerError,
 		},
 		{
@@ -83,17 +80,15 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// 1. Настраиваем фейковый паблишер
-			mockPub := &mockPublisher{err: tt.mockPubErr}
+			mockPub := &mockMsgPublisher{err: tt.mockPubErr}
 			handler := NewProfileHandler(mockPub)
 
 			// 2. Готовим тело запроса
 			var reqBody []byte
-			if tt.body != nil {
-				// Если мы специально подсунули "неконвертируемый" тип, игнорируем ошибку для теста на кривой JSON
+			if tt.name == "Invalid JSON (Body is wrong)" {
+				reqBody = []byte(`{"user_id": "123", missing quotes}`)
+			} else if tt.body != nil {
 				reqBody, _ = json.Marshal(tt.body)
-				if tt.name == "Invalid JSON (Body is wrong)" {
-					reqBody = []byte(`{"user_id": "123", missing quotes}`)
-				}
 			}
 
 			// 3. Создаем фейковый HTTP запрос и ResponseRecorder
