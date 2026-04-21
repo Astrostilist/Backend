@@ -227,7 +227,11 @@ func (c *AstroAPIClient) fetchProfile(ctx context.Context, birthDate, birthPlace
 	if err != nil {
 		return profile, fmt.Errorf("send astro API request: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+        if err := response.Body.Close(); err != nil {
+            logger.Error("Failed to close response body", zap.Error(err))
+        }
+    }()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
