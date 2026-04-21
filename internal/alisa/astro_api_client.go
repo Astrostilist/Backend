@@ -18,8 +18,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var logger *zap.Logger
-
 const (
 	defaultAstroProfileCacheBucket = "astro_profiles"
 	defaultAstroProfileCacheTTL    = 24 * time.Hour
@@ -231,7 +229,7 @@ func (c *AstroAPIClient) fetchProfile(ctx context.Context, birthDate, birthPlace
 	}
 	defer func() {
         if err := response.Body.Close(); err != nil {
-            logger.Error("Failed to close response body", zap.Error(err))
+            c.logger.Error("failed to close response body", zap.Error(err))
         }
     }()
 
