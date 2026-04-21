@@ -18,6 +18,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var logger *zap.Logger
+
 const (
 	defaultAstroProfileCacheBucket = "astro_profiles"
 	defaultAstroProfileCacheTTL    = 24 * time.Hour
