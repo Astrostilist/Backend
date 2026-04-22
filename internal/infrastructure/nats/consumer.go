@@ -4,7 +4,7 @@ import (
 	"astroapi/internal/models"
 	"context"
 	"fmt"
-
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -43,7 +43,7 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 					zap.String("error", err.Error()))
 				attempt := uint64(1)
 				id := uint64(0)
-				if meta, err := msg.Metadata(); err != nil {
+				if meta, metaErr := msg.Metadata(); metaErr == nil {
 					attempt = meta.NumDelivered
 					id = meta.Sequence.Stream
 				}
@@ -61,8 +61,8 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 					c.sm.logger.Info("Temporary error, allowing redelivery", zap.String("consumer", consumerName))
 					// длительность задержки игнорируется, т к приоритет у настроек стрима,
 					// но на всякий случай продублируем здесь
-					delayId := min(attempt, 3)
-					if nackErr := msg.NakWithDelay(backOff[delayId]); nackErr != nil {
+					delayID := min(attempt, 3)
+					if nackErr := msg.NakWithDelay(backOff[delayID]); nackErr != nil {
 						c.sm.logger.Error("Failed to negative acknowledge message",
 							zap.String("error", nackErr.Error()))
 					} else {
@@ -71,7 +71,7 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 							zap.String("subject", msg.Subject()),
 							zap.Uint64("msg_id", id),
 							zap.Uint64("attempt", attempt),
-							zap.Any("next_delay", backOff[delayId]),
+							zap.Any("next_delay", backOff[delayID]),
 							zap.Error(err))
 					}
 
@@ -102,29 +102,14 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 	return nil
 }
 
+var permanentErrorMarkers = []string{"validation", "malformed", "invalid_format"}
+
 func isPermanentError(err error) bool {
 	errStr := err.Error()
-	switch {
-	case containsAny(errStr, "validation", "malformed", "invalid_format"):
-		return true
-	case containsAny(errStr, "timeout", "connection", "temporary"):
-		return false
-	default:
-		return false
-	}
-}
-
-func containsAny(s string, substrings ...string) bool {
-	for _, substr := range substrings {
-		if contains(s, substr) {
+	for _, marker := range permanentErrorMarkers {
+		if strings.Contains(errStr, marker) {
 			return true
 		}
 	}
 	return false
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(contains(s[:len(s)-len(substr)+1], substr) ||
-			contains(s[len(substr)-1:], substr))
 }

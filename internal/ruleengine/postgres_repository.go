@@ -231,9 +231,9 @@ func buildListQuery(whereClause string, limitArgIndex int, offsetArgIndex int) s
 	queryBuilder.WriteString(`
 		ORDER BY priority ASC, created_at DESC
 		LIMIT $`)
-	queryBuilder.WriteString(fmt.Sprintf("%d", limitArgIndex))
+	fmt.Fprintf(&queryBuilder, "%d", limitArgIndex)
 	queryBuilder.WriteString(` OFFSET $`)
-	queryBuilder.WriteString(fmt.Sprintf("%d", offsetArgIndex))
+	fmt.Fprintf(&queryBuilder, "%d", offsetArgIndex)
 
 	return queryBuilder.String()
 }

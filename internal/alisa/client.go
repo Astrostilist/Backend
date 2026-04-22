@@ -12,10 +12,18 @@ import (
 	"time"
 )
 
+//go:generate mockgen -source=client.go -destination=mocks/mock_alisa.go -package=mocks
+
 const (
 	defaultTimeout    = 10 * time.Second
 	defaultMaxRetries = 3
 )
+
+// Generator — единственный наружный интерфейс клиента AlisaAI.
+// Используется хендлерами, чтобы позволять мокирование в тестах.
+type Generator interface {
+	Generate(ctx context.Context, prompt string) (string, error)
+}
 
 type Client struct {
 	baseURL    string
@@ -183,10 +191,9 @@ func (e retryableError) Error() string {
 }
 
 func isRetryableError(err error) bool {
-	_, ok := err.(retryableError)
-	return ok
+	var re retryableError
+	return errors.As(err, &re)
 }
 
-func NewClientFromEnv(baseURL, apiKey, modelURL string) *Client {
-	return NewClient(baseURL, apiKey, modelURL)
-}
+// static assertion на соответствие интерфейсу
+var _ Generator = (*Client)(nil)
