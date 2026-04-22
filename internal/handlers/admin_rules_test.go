@@ -178,6 +178,78 @@ func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
 	}
 }
 
+func TestCreateRuleSucceeds(t *testing.T) {
+	t.Parallel()
+
+	repository := newFakeRulesRepository(nil)
+	payload := []byte(`{"name":"Lunar","astro_condition":{"moon":"full"},"product_tags":["mystic"],"priority":10,"is_active":true}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/rules", bytes.NewReader(payload))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	response := httptest.NewRecorder()
+
+	mux := newAdminRulesTestMux(repository)
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d, body=%s", response.Code, response.Body.String())
+	}
+
+	if _, ok := repository.items["created-rule-id"]; !ok {
+		t.Fatal("rule was not stored")
+	}
+}
+
+func TestUpdateRuleModifiesFields(t *testing.T) {
+	t.Parallel()
+
+	ruleID := "11111111-1111-1111-1111-111111111111"
+	repository := newFakeRulesRepository([]rules.Rule{
+		{
+			ID:             ruleID,
+			Name:           "Old",
+			AstroCondition: map[string]any{"sign": "aries"},
+			ProductTags:    []string{"fire"},
+			Priority:       5,
+			IsActive:       true,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		},
+	})
+
+	payload := []byte(`{"name":"New","astro_condition":{"sign":"taurus"},"product_tags":["earth"],"priority":7,"is_active":true}`)
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/rules/"+ruleID, bytes.NewReader(payload))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	response := httptest.NewRecorder()
+
+	mux := newAdminRulesTestMux(repository)
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", response.Code, response.Body.String())
+	}
+
+	updated := repository.items[ruleID]
+	if updated.Name != "New" || updated.Priority != 7 {
+		t.Fatalf("rule not updated: %+v", updated)
+	}
+}
+
+func TestUpdateRuleNotFound(t *testing.T) {
+	t.Parallel()
+
+	payload := []byte(`{"name":"X","astro_condition":{"a":"b"},"product_tags":["t"],"priority":1,"is_active":true}`)
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/rules/missing", bytes.NewReader(payload))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	response := httptest.NewRecorder()
+
+	mux := newAdminRulesTestMux(newFakeRulesRepository(nil))
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", response.Code)
+	}
+}
+
 func TestListRulesFiltersByActiveFlag(t *testing.T) {
 	t.Parallel()
 

@@ -14,7 +14,7 @@ func (r *PostgresRepository) Match(ctx context.Context, triggers []string) ([]st
 		return []string{}, nil
 	}
 
-	is_active := true
+	isActive := true
 
 	query := `
 	SELECT product_tags, priority
@@ -26,7 +26,7 @@ func (r *PostgresRepository) Match(ctx context.Context, triggers []string) ([]st
 	uniqueTags := make([]string, 0)
 	tags := make(map[string]int)
 
-	rows, err := r.db.QueryContext(ctx, query, is_active, pq.Array(triggers))
+	rows, err := r.db.QueryContext(ctx, query, isActive, pq.Array(triggers))
 	if err != nil {
 		return nil, err
 	}
@@ -38,24 +38,18 @@ func (r *PostgresRepository) Match(ctx context.Context, triggers []string) ([]st
 
 	for rows.Next() {
 		var tmp []byte
-		var tmpJson []string
+		var tmpJSON []string
 		var p int
-		err = rows.Scan(&tmp, &p)
-		if err != nil {
+		if err := rows.Scan(&tmp, &p); err != nil {
 			return nil, err
 		}
-
-		err := json.Unmarshal(tmp, &tmpJson)
-		if err != nil {
+		if err := json.Unmarshal(tmp, &tmpJSON); err != nil {
 			return nil, err
 		}
-
-		for _, val := range tmpJson {
-
+		for _, val := range tmpJSON {
 			if _, ok := tags[val]; !ok {
-
 				uniqueTags = append(uniqueTags, val)
-				tags[val] += 1
+				tags[val]++
 			}
 		}
 	}
