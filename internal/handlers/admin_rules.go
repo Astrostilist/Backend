@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -14,28 +15,38 @@ import (
 )
 
 const (
-	defaultRulesLimit   = 50
-	maxRulesLimit       = 200
-	defaultRulePriority = 100
+	defaultRulesLimit = 50
+	maxRulesLimit     = 200
+	dfltPriority      = 99
 )
+
+var planets = []string{"sun", "moon", "mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto"}
+var signs = []string{"aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"}
 
 type AdminRulesHandler struct {
 	repository rules.Repository
 }
 
 type adminRuleRequest struct {
-	Name           string         `json:"name"`
-	AstroCondition map[string]any `json:"astro_condition"`
-	ProductTags    []string       `json:"product_tags"`
-	Priority       *int           `json:"priority"`
-	IsActive       *bool          `json:"is_active"`
+	Name           string            `json:"name"`
+	AstroCondition map[string]string `json:"astro_condition"`
+	ProductTags    []string          `json:"product_tags"`
+	Priority       *int              `json:"priority"`
+	IsActive       *bool             `json:"is_active"`
 }
 
 type adminRulesListResponse struct {
-	Items      []rules.Rule `json:"items"`
-	Limit      int          `json:"limit"`
-	Offset     int          `json:"offset"`
-	TotalCount int          `json:"total_count"`
+	Items    []rules.Rule `json:"items"`
+	Metadata struct {
+		CurrentPage  int `json:"current_page,omitzero"`
+		PageSize     int `json:"page_size,omitzero"`
+		FirstPage    int `json:"first_page,omitzero"`
+		LastPage     int `json:"last_page,omitzero"`
+		TotalRecords int `json:"total_records,omitzero"`
+	}
+	// Limit      int `json:"limit"`
+	// Offset     int `json:"offset"`
+	// TotalCount int `json:"total_count"`
 }
 
 func NewAdminRulesHandler(repository rules.Repository) *AdminRulesHandler {
@@ -59,7 +70,7 @@ func (h *AdminRulesHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.repository.List(r.Context(), listOptions)
+	result, metadata, err := h.repository.List(r.Context(), listOptions)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch astro rules")
 		return
@@ -68,10 +79,8 @@ func (h *AdminRulesHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Astro rules fetched successfully",
 		Data: adminRulesListResponse{
-			Items:      result.Items,
-			Limit:      listOptions.Limit,
-			Offset:     listOptions.Offset,
-			TotalCount: result.TotalCount,
+			Items:    result,
+			Metadata: metadata,
 		},
 	})
 }
@@ -89,7 +98,7 @@ func (h *AdminRulesHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	createdRule, err := h.repository.Create(r.Context(), input)
+	createdRule, err := h.repository.Create(r.Context(), &input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create astro rule")
 		return
@@ -120,7 +129,7 @@ func (h *AdminRulesHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updatedRule, err := h.repository.Update(r.Context(), ruleID, input)
+	updatedRule, err := h.repository.Update(r.Context(), ruleID, &input)
 	if err != nil {
 		if errors.Is(err, rules.ErrRuleNotFound) {
 			writeError(w, http.StatusNotFound, "astro rule not found")
@@ -193,12 +202,26 @@ func (r adminRuleRequest) toRuleInput() (rules.RuleInput, error) {
 		return rules.RuleInput{}, errors.New("astro_condition is required")
 	}
 
-	priority := defaultRulePriority
+	var conditions []rules.AstroCondition
+	for p, s := range r.AstroCondition {
+		if !slices.Contains(planets, strings.ToLower(p)) {
+			return rules.RuleInput{}, errors.New("astro condition has invalid value of planet")
+		}
+		if !slices.Contains(signs, strings.ToLower(s)) {
+			return rules.RuleInput{}, errors.New("astro condition has invalid value of sign")
+		}
+		var tmpCndt rules.AstroCondition
+		tmpCndt.Planet = strings.ToLower(p)
+		tmpCndt.Sign = strings.ToLower(s)
+		conditions = append(conditions, tmpCndt)
+	}
+
+	priority := dfltPriority
 	if r.Priority != nil {
 		priority = *r.Priority
 	}
-	if priority < 0 {
-		return rules.RuleInput{}, errors.New("priority must be greater than or equal to 0")
+	if (priority < 0) && (priority > 100) {
+		return rules.RuleInput{}, errors.New("priority must be greater than or equal to 0 and less than 100")
 	}
 
 	productTags := r.ProductTags
@@ -213,7 +236,7 @@ func (r adminRuleRequest) toRuleInput() (rules.RuleInput, error) {
 
 	return rules.RuleInput{
 		Name:           name,
-		AstroCondition: r.AstroCondition,
+		AstroCondition: conditions,
 		ProductTags:    productTags,
 		Priority:       priority,
 		IsActive:       isActive,

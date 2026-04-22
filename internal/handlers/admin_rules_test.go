@@ -13,6 +13,8 @@ import (
 	rules "astroapi/internal/ruleengine"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
 const testAdminToken = "test-admin-token"
@@ -24,12 +26,11 @@ type fakeRulesRepository struct {
 func newFakeRulesRepository(items []rules.Rule) *fakeRulesRepository {
 	repository := &fakeRulesRepository{items: make(map[string]rules.Rule, len(items))}
 	for _, item := range items {
-		repository.items[item.ID] = item
+		repository.items[item.ID.String()] = item
 	}
 	return repository
 }
-
-func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions) (rules.ListResult, error) {
+func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions) ([]rules.Rule, rules.Metadata, error) {
 	filtered := make([]rules.Rule, 0, len(r.items))
 	for _, item := range r.items {
 		if options.IsActive != nil && item.IsActive != *options.IsActive {
@@ -40,7 +41,7 @@ func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions)
 
 	sort.Slice(filtered, func(i, j int) bool {
 		if filtered[i].Priority == filtered[j].Priority {
-			return filtered[i].ID < filtered[j].ID
+			return filtered[i].ID.String() < filtered[j].ID.String()
 		}
 		return filtered[i].Priority < filtered[j].Priority
 	})
@@ -48,17 +49,23 @@ func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions)
 	start := min(options.Offset, len(filtered))
 
 	end := min(start+options.Limit, len(filtered))
-
-	return rules.ListResult{
-		Items:      filtered[start:end],
-		TotalCount: len(filtered),
-	}, nil
+	mtdata := rules.Metadata{
+		CurrentPage:  options.Limit,
+		PageSize:     options.Limit,
+		FirstPage:    start,
+		LastPage:     end,
+		TotalRecords: len(filtered),
+	}
+	return filtered[start:end], mtdata, nil
 }
-
-func (r *fakeRulesRepository) Create(_ context.Context, input rules.RuleInput) (rules.Rule, error) {
+func (r *fakeRulesRepository) Create(_ context.Context, input *rules.RuleInput) (*rules.Rule, error) {
 	now := time.Now().UTC()
+	smplID, err := uuid.Parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	if err != nil {
+		return nil, err
+	}
 	createdRule := rules.Rule{
-		ID:             "created-rule-id",
+		ID:             smplID,
 		Name:           input.Name,
 		AstroCondition: input.AstroCondition,
 		ProductTags:    input.ProductTags,
@@ -67,14 +74,14 @@ func (r *fakeRulesRepository) Create(_ context.Context, input rules.RuleInput) (
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	r.items[createdRule.ID] = createdRule
-	return createdRule, nil
+	r.items[createdRule.ID.String()] = createdRule
+	return &createdRule, nil
 }
 
-func (r *fakeRulesRepository) Update(_ context.Context, id string, input rules.RuleInput) (rules.Rule, error) {
+func (r *fakeRulesRepository) Update(_ context.Context, id string, input *rules.RuleInput) (*rules.Rule, error) {
 	currentRule, ok := r.items[id]
 	if !ok {
-		return rules.Rule{}, rules.ErrRuleNotFound
+		return nil, rules.ErrRuleNotFound
 	}
 
 	currentRule.Name = input.Name
@@ -85,20 +92,41 @@ func (r *fakeRulesRepository) Update(_ context.Context, id string, input rules.R
 	currentRule.UpdatedAt = time.Now().UTC()
 	r.items[id] = currentRule
 
-	return currentRule, nil
+	return &currentRule, nil
 }
 
-func (r *fakeRulesRepository) Deactivate(_ context.Context, id string) (rules.Rule, error) {
+func (r *fakeRulesRepository) Get(id string) (*rules.Rule, error) {
 	currentRule, ok := r.items[id]
 	if !ok {
-		return rules.Rule{}, rules.ErrRuleNotFound
+		return nil, rules.ErrRuleNotFound
+	}
+
+	currentRule.Name = ""
+	currentRule.AstroCondition = []rules.AstroCondition{}
+	currentRule.ProductTags = []string{}
+	currentRule.Priority = 1
+	currentRule.IsActive = true
+	currentRule.UpdatedAt = time.Now().UTC()
+	r.items[id] = currentRule
+
+	return &currentRule, nil
+}
+
+func (r *fakeRulesRepository) Delete(id string) error {
+	return nil
+}
+
+func (r *fakeRulesRepository) Deactivate(_ context.Context, id string) (*rules.Rule, error) {
+	currentRule, ok := r.items[id]
+	if !ok {
+		return nil, rules.ErrRuleNotFound
 	}
 
 	currentRule.IsActive = false
 	currentRule.UpdatedAt = time.Now().UTC()
 	r.items[id] = currentRule
 
-	return currentRule, nil
+	return &currentRule, nil
 }
 func (r *fakeRulesRepository) Match(_ context.Context, tags []string) ([]string, error) {
 
@@ -143,21 +171,24 @@ func TestCreateRuleRejectsNegativePriority(t *testing.T) {
 func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
 	t.Parallel()
 
-	ruleID := "11111111-1111-1111-1111-111111111111"
+	smplId, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
+	require.NoError(t, err)
 	repository := newFakeRulesRepository([]rules.Rule{
 		{
-			ID:             ruleID,
-			Name:           "Seasonal rule",
-			AstroCondition: map[string]any{"sign": "aries"},
-			ProductTags:    []string{"spring"},
-			Priority:       10,
-			IsActive:       true,
-			CreatedAt:      time.Now().UTC(),
-			UpdatedAt:      time.Now().UTC(),
+			ID:   smplId,
+			Name: "Seasonal rule",
+			AstroCondition: []rules.AstroCondition{
+				{Sign: "aries"},
+			},
+			ProductTags: []string{"spring"},
+			Priority:    10,
+			IsActive:    true,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 		},
 	})
 
-	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/rules/"+ruleID, nil)
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/rules/"+smplId.String(), nil)
 	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
@@ -168,7 +199,7 @@ func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
 	}
 
-	storedRule, exists := repository.items[ruleID]
+	storedRule, exists := repository.items[smplId.String()]
 	if !exists {
 		t.Fatal("expected soft-deleted rule to stay in repository")
 	}
@@ -180,27 +211,35 @@ func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
 
 func TestListRulesFiltersByActiveFlag(t *testing.T) {
 	t.Parallel()
+	smplId1, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
+	require.NoError(t, err)
+	smplId2, err := uuid.Parse("22222222-2222-2222-2222-222222222222")
+	require.NoError(t, err)
 
 	repository := newFakeRulesRepository([]rules.Rule{
 		{
-			ID:             "11111111-1111-1111-1111-111111111111",
-			Name:           "Active rule",
-			AstroCondition: map[string]any{"sign": "aries"},
-			ProductTags:    []string{"spring"},
-			Priority:       1,
-			IsActive:       true,
-			CreatedAt:      time.Now().UTC(),
-			UpdatedAt:      time.Now().UTC(),
+			ID:   smplId1,
+			Name: "Active rule",
+			AstroCondition: []rules.AstroCondition{
+				{Sign: "aries"},
+			},
+			ProductTags: []string{"spring"},
+			Priority:    1,
+			IsActive:    true,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 		},
 		{
-			ID:             "22222222-2222-2222-2222-222222222222",
-			Name:           "Inactive rule",
-			AstroCondition: map[string]any{"sign": "taurus"},
-			ProductTags:    []string{"earth"},
-			Priority:       2,
-			IsActive:       false,
-			CreatedAt:      time.Now().UTC(),
-			UpdatedAt:      time.Now().UTC(),
+			ID:   smplId2,
+			Name: "Inactive rule",
+			AstroCondition: []rules.AstroCondition{
+				{Sign: "taurus"},
+			},
+			ProductTags: []string{"earth"},
+			Priority:    2,
+			IsActive:    false,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 		},
 	})
 
