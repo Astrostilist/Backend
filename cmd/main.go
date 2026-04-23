@@ -94,7 +94,7 @@ func run() error {
 		10*time.Minute,
 		[]string{cfg.MemcachedHost},
 	)
-	//Инициализируем UseCase
+	//UseCase
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(
 		dbRepo,
 		cacheRepo,

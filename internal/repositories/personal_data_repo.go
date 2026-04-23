@@ -1,8 +1,11 @@
 package repositories
 
-import "astroapi/internal/domain"
+import (
+	"astroapi/internal/repositories/domain"
+	"context"
+)
 
 // PersonalDataRepository – порт для сохранения персональных данных
 type PersonalDataRepository interface {
-	Save(data domain.PersonalData) error
+	Save(ctx context.Context, data domain.PersonalData) error
 }
