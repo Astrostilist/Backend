@@ -158,7 +158,7 @@ func (c *AstroAPIClient) GetAstroProfile(birthDate, birthPlace string) (AstroPro
 	}
 
 	if c.cache != nil {
-		if err = c.cacheProfile(ctx, cacheKey, profile); err != nil {
+		if err := c.cacheProfile(ctx, cacheKey, profile); err != nil {
 			return profile, err
 		}
 	}
@@ -218,7 +218,7 @@ func (c *AstroAPIClient) fetchProfile(ctx context.Context, birthDate, birthPlace
 		return profile, err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, http.NoBody)
 	if err != nil {
 		return profile, fmt.Errorf("create astro API request: %w", err)
 	}
