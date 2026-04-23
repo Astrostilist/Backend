@@ -1,9 +1,11 @@
-package rules
+package ruleengine
 
 import (
 	"context"
 	"time"
 )
+
+//go:generate mockgen -source=rules.go -destination=mocks/mock_rules.go -package=mocks
 
 type Rule struct {
 	ID             string         `json:"id"`
@@ -40,4 +42,5 @@ type Repository interface {
 	Create(ctx context.Context, input RuleInput) (Rule, error)
 	Update(ctx context.Context, id string, input RuleInput) (Rule, error)
 	Deactivate(ctx context.Context, id string) (Rule, error)
+	Match(ctx context.Context, triggers []string) ([]string, error)
 }
