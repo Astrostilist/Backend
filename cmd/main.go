@@ -18,7 +18,6 @@ import (
 	"astroapi/internal/handlers"
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/logger"
-	"astroapi/internal/messaging"
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
