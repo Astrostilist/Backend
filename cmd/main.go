@@ -16,6 +16,7 @@ import (
 	"astroapi/internal/handlers"
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
+	"astroapi/internal/repositories"
 
 	natsadapter "astroapi/internal/nats"
 	natsinfra "astroapi/internal/repositories/nats"
@@ -49,9 +50,25 @@ func main() {
 	if err != nil {
 		log.Fatal("Invalid base64 key:", err)
 	}
-	_ = key
 
 	cfg := config.Load()
+
+	//Personal Data repositories
+	dbRepo := repositories.NewDBPersonalDataRepository(
+		database.DB.DB,
+		key,
+	)
+
+	cacheRepo := repositories.NewCacheRepo(
+		10*time.Minute,
+		[]string{cfg.MemcachedHost},
+	)
+	//Инициализируем UseCase
+	personalDataUC := usecases.NewProcessPersonalDataUseCase(
+		dbRepo,
+		cacheRepo,
+	)
+	_ = personalDataUC
 
 	if cfg.AdminToken == "" {
 		log.Println("Warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")

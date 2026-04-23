@@ -1,0 +1,47 @@
+package repositories
+
+import (
+	"astroapi/internal/repositories/domain"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/bradfitz/gomemcache/memcache"
+)
+
+type cacheRepo struct {
+	client *memcache.Client
+	ttl    int32
+}
+
+func NewCacheRepo(ttl time.Duration, servers []string) *cacheRepo {
+	return &cacheRepo{
+		client: memcache.New(servers...),
+		ttl:    int32(ttl.Seconds()),
+	}
+}
+
+func (r *cacheRepo) Save(ctx context.Context, data domain.PersonalData) error {
+	if data.UserID == "" {
+		return errors.New("UserID не может быть пустым")
+	}
+	key := fmt.Sprintf("personal_data:%s", data.UserID)
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("ошибка сериализации персональных данных: %w", err)
+	}
+	// Создаём запись в Memcached
+	item := &memcache.Item{
+		Key:        key,
+		Value:      jsonData,
+		Expiration: r.ttl,
+	}
+
+	if err := r.client.Set(item); err != nil {
+		return fmt.Errorf("ошибка сохранения memcached: %w", err)
+	}
+
+	return nil
+}
