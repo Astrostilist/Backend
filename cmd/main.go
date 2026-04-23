@@ -28,7 +28,6 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/nats-io/nats.go/jetstream"
-
 	"go.uber.org/zap"
 )
 

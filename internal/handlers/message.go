@@ -33,6 +33,10 @@ type MsgRouter struct {
 }
 
 func NewMsgRouter(logger *zap.Logger) *MsgRouter {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
 	return &MsgRouter{
 		handlers: make(map[string]EventHandler),
 		logger:   logger,
