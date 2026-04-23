@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+//go:generate mockgen -source=rules.go -destination=mocks/mock_rules.go -package=mocks
+
 type Rule struct {
 	ID             string         `json:"id"`
 	Name           string         `json:"name"`

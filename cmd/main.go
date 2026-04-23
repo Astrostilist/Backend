@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -20,194 +21,200 @@ import (
 	"astroapi/internal/messaging"
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
-
+	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
+	"astroapi/internal/user"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/joho/godotenv"
+
 	"github.com/nats-io/nats.go/jetstream"
 	"go.uber.org/zap"
 )
 
+const (
+	httpReadTimeout  = 15 * time.Second
+	httpWriteTimeout = 15 * time.Second
+	httpIdleTimeout  = 60 * time.Second
+	initTimeout      = 15 * time.Second
+	shutdownTimeout  = 30 * time.Second
+)
+
 func main() {
-	ctx := context.Background()
-
-	// Загружаем переменные из .env файла
-	if err := godotenv.Load(); err != nil {
-		log.Println("Warning: .env file not found, using system environment variables")
+	if err := run(); err != nil {
+		log.Fatalf("fatal: %v", err)
 	}
+}
 
-	// Паникуем при отсутствии ключа
-	encodedKey := os.Getenv("ENCRYPTION_KEY")
-	if encodedKey == "" {
-		log.Fatal("ENCRYPTION_KEY is not set")
-	}
-
-	// Декодируем из base64
-	key, err := base64.StdEncoding.DecodeString(encodedKey)
-	if err != nil {
-		log.Fatal("Invalid base64 key:", err)
-	}
-	_ = key
-
+func run() error {
 	cfg := config.Load()
 
+	encryptionKey, err := decodeEncryptionKey(cfg.EncryptionKey)
+	if err != nil {
+		return err
+	}
+
 	if cfg.AdminToken == "" {
-		log.Println("Warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
+		log.Println("warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
 	}
 
-	// Инициализируем логгер
-	appLogger, err := logger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
+	zapLogger, err := logger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
 	if err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+		return err
 	}
 	defer func() {
-		if err := appLogger.Sync(); err != nil {
-			log.Printf("Failed to sync logger: %v", err)
+		if syncErr := zapLogger.Sync(); syncErr != nil {
+			log.Printf("failed to sync logger: %v", syncErr)
 		}
 	}()
 
-	// Инициализируем NATS
-	nc, err := natsinfra.InitNATS(ctx, appLogger, cfg)
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
+	// 1. Database
+	db, err := database.New(rootCtx, cfg)
 	if err != nil {
-		appLogger.Fatal("Failed to connect to NATS", zap.Error(err))
-	}
-	defer nc.DrainNATS()
-
-	js, err := jetstream.New(nc.Conn)
-	if err != nil {
-		appLogger.Fatal("Failed to create JetStream context", zap.Error(err))
-	}
-
-	// Делаем JetStream доступным для HTTP handlers (/astro/profile и /astro/recommend)
-	messaging.JS = js
-
-	// Клиент Astro API для worker flow
-	astroClient := alisa.NewAstroAPIClientFromConfig(cfg, js, appLogger)
-
-	// Клиент AlisaAI для recommendation flow
-	alisaClient := alisa.NewClient(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL)
-
-	// Конфигурируем message handlers с зависимостями
-	handlers.ConfigureMessageHandlers(astroClient, alisaClient, nil, appLogger)
-
-	jsadapter := natsinfra.NewJetStreamRepository(js, appLogger)
-
-	// Инициализируем стримы
-	jsctx, jscancel := context.WithTimeout(ctx, 10*time.Second)
-	defer jscancel()
-
-	if err := jsadapter.InitializeStreams(jsctx); err != nil {
-		appLogger.Fatal("Failed to initialize streams", zap.Error(err))
-	}
-
-	// Инициализируем базу данных
-	if err := database.InitDB(cfg); err != nil {
-		appLogger.Fatal("Failed to initialize database", zap.Error(err))
+		return err
 	}
 	defer func() {
-		if err := database.DB.Close(); err != nil {
-			appLogger.Error("Error closing database connection", zap.Error(err))
+		if closeErr := db.Close(); closeErr != nil {
+			zapLogger.Error("failed to close database", zap.Error(closeErr))
 		}
 	}()
 
-	// Адаптер для публикации исходящих сообщений в NATS
-	_ = natsinfra.NewMessagePublisher(jsadapter, appLogger)
+	// 2. NATS + JetStream
+	natsConn, err := natsinfra.InitNATS(rootCtx, zapLogger, cfg)
+	if err != nil {
+		return err
+	}
+	defer natsConn.DrainNATS()
 
-	// Роутер обработки входящих сообщений
-	msgRouter := handlers.NewMsgRouter(appLogger)
-	msgRouter.Register(models.MsgRecommendSubj, handlers.HandlerFunc(handlers.HandleRecommend))
-	msgRouter.Register(models.MsgProfileSubj, handlers.HandlerFunc(handlers.HandleProfile))
+	js, err := jetstream.New(natsConn.Conn)
+	if err != nil {
+		return err
+	}
 
-	consumer := natsinfra.NewMessageConsumer(jsadapter, appLogger)
+	jsAdapter := natsinfra.NewJetStreamRepository(js, zapLogger)
 
-	wg := sync.WaitGroup{}
+	initCtx, initCancel := context.WithTimeout(rootCtx, initTimeout)
+	if err := jsAdapter.InitializeStreams(initCtx); err != nil {
+		initCancel()
+		return err
+	}
+	initCancel()
 
-	// Запускаем два воркера в отдельных горутинах
-	wg.Go(func() {
-		err := consumer.ConsumeWithHandler(
-			jsctx,
-			models.MsgStreamEvents,
-			models.MsgProfileWrk,
+	publisher := natsinfra.NewMessagePublisher(jsAdapter, zapLogger)
+
+	// 3. Repositories
+	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
+	requestsRepo := requests.NewPostgresRepository(db.DB)
+	rulesRepo := rules.NewPostgresRepository(db.DB)
+
+	// 4. AI client
+	aiClient := alisa.NewClient(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL)
+
+	// 5. Message router + processors (consumers)
+	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, zapLogger)
+	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, zapLogger)
+
+	msgRouter := handlers.NewMsgRouter(zapLogger)
+	msgRouter.Register(models.MsgProfileSubj, profileProcessor)
+	msgRouter.Register(models.MsgRecommendSubj, recommendProcessor)
+
+	consumer := natsinfra.NewMessageConsumer(jsAdapter, zapLogger)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := consumer.ConsumeWithHandler(rootCtx, models.MsgStreamEvents, models.MsgProfileWrk,
 			func(ctx context.Context, msg jetstream.Msg) error {
 				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
-			},
-		)
-		if err != nil {
-			appLogger.Error("Profile worker failed", zap.Error(err))
+			}); err != nil {
+			zapLogger.Error("profile worker failed", zap.Error(err))
 		}
-	})
-
-	wg.Go(func() {
-		err := consumer.ConsumeWithHandler(
-			jsctx,
-			models.MsgStreamEvents,
-			models.MsgRecommendWrk,
+		<-rootCtx.Done()
+	}()
+	go func() {
+		defer wg.Done()
+		if err := consumer.ConsumeWithHandler(rootCtx, models.MsgStreamEvents, models.MsgRecommendWrk,
 			func(ctx context.Context, msg jetstream.Msg) error {
 				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
-			},
-		)
-		if err != nil {
-			appLogger.Error("Recommend worker failed", zap.Error(err))
+			}); err != nil {
+			zapLogger.Error("recommend worker failed", zap.Error(err))
 		}
-	})
+		<-rootCtx.Done()
+	}()
 
-	rulesRepository := rules.NewPostgresRepository(database.DB.DB)
-	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepository)
+	// 6. HTTP handlers
+	helloHandler := handlers.NewHelloHandler(handlers.NewRealHelloService(db))
+	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, zapLogger)
+	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
+	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 
-	helloService := &handlers.RealHelloService{}
-	helloHandler := handlers.NewHelloHandler(helloService)
-
-	// Настраиваем роутер chi и middleware
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(astromidware.RequestLogger(appLogger))
+	r.Use(astromidware.RequestLogger(zapLogger))
 	r.Use(middleware.Recoverer)
 
-	// Регистрируем ВСЕ маршруты
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
-	r.Post("/api/v1/astro/profile", handlers.ProfileHandler)
-	r.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
-
+	r.Post("/api/v1/astro/profile", profileHandler.Handle)
+	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 
-	// Создаем HTTP сервер
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  httpReadTimeout,
+		WriteTimeout: httpWriteTimeout,
+		IdleTimeout:  httpIdleTimeout,
 	}
 
-	// Запускаем сервер в горутине
+	// 7. Run HTTP server
+	serverErr := make(chan error, 1)
 	go func() {
-		appLogger.Info("App starting on port 8080")
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			appLogger.Fatal("Server failed to start", zap.Error(err))
+		zapLogger.Info("app starting", zap.String("addr", srv.Addr))
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
 		}
+		close(serverErr)
 	}()
 
-	// Ожидаем сигнал для graceful shutdown
+	// 8. Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	appLogger.Info("Shutting down server...")
-
-	downctx, cancelDown := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelDown()
-
-	if err := srv.Shutdown(downctx); err != nil {
-		appLogger.Fatal("Server forced to shutdown", zap.Error(err))
-		if closeErr := srv.Close(); closeErr != nil {
-			appLogger.Fatal("Server forced close error", zap.Error(closeErr))
+	select {
+	case <-quit:
+		zapLogger.Info("shutdown signal received")
+	case err := <-serverErr:
+		if err != nil {
+			return err
 		}
 	}
 
-	jscancel()
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancelShutdown()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		zapLogger.Error("server shutdown error", zap.Error(err))
+	}
+	rootCancel() // stop consumers
 	wg.Wait()
 
-	appLogger.Info("Server exited")
+	zapLogger.Info("server exited")
+	return nil
+}
+
+func decodeEncryptionKey(encoded string) ([]byte, error) {
+	if encoded == "" {
+		return nil, errors.New("ENCRYPTION_KEY is not set")
+	}
+	key, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, errors.New("ENCRYPTION_KEY must be valid base64")
+	}
+	if len(key) != 32 {
+		return nil, errors.New("ENCRYPTION_KEY must decode to 32 bytes")
+	}
+	return key, nil
 }
