@@ -41,11 +41,6 @@ type Config struct {
 	NATSPort      string
 	NATSClusterID string
 	NATSClientID  string
-
-	// AI
-	AIBaseURL  string
-	AIAPIKey   string
-	AIModelURL string
 }
 
 // Load читает переменные окружения. .env-файл подхватывается один раз здесь,
@@ -84,10 +79,6 @@ func Load() *Config {
 		NATSPort:      getEnv("NATS_PORT", "4222"),
 		NATSClusterID: getEnv("NATS_CLUSTER_ID", "test-cluster"),
 		NATSClientID:  getEnv("NATS_CLIENT_ID", "astro-backend"),
-
-		AIBaseURL:  getEnv("AI_BASE_URL", "https://ai.api.cloud.yandex.net/v1"),
-		AIAPIKey:   getEnv("AI_API_KEY", ""),
-		AIModelURL: getEnv("AI_MODEL_URL", ""),
 	}
 }
 
