@@ -1,16 +1,63 @@
-package handlers
+package handlers_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
+	"astroapi/internal/handlers"
+	msgmocks "astroapi/internal/handlers/mocks"
+	"astroapi/internal/models"
+	reqmocks "astroapi/internal/requests/mocks"
+
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"go.uber.org/zap"
 )
 
-func TestProfileHandler(t *testing.T) {
-	// Создаем "таблицу" тест-кейсов
+const validProfilePayload = `{
+	"user_id": "123e4567-e89b-12d3-a456-426614174000",
+	"birth_date": "1990-01-01",
+	"birth_place": "Moscow",
+	"consent_given": true
+}`
+
+func TestProfileHandler_Success(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+
+	publisher := msgmocks.NewMockMsgPublisher(ctrl)
+	requestsRepo := reqmocks.NewMockRepository(ctrl)
+
+	requestsRepo.EXPECT().
+		Create(gomock.Any(), gomock.Any()).
+		Return(nil).
+		Times(1)
+
+	publisher.EXPECT().
+		PublishMessage(gomock.Any(), models.MsgStreamEvents, models.MsgProfileSubj, gomock.Any()).
+		Return(nil).
+		Times(1)
+
+	h := handlers.NewProfileHandler(publisher, requestsRepo, zap.NewNop())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/profile", bytes.NewBufferString(validProfilePayload))
+	rr := httptest.NewRecorder()
+
+	h.Handle(rr, req)
+
+	require.Equal(t, http.StatusAccepted, rr.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	require.NotEmpty(t, resp["request_id"])
+}
+
+func TestProfileHandler_ValidationAndErrors(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name           string
 		method         string
@@ -18,66 +65,74 @@ func TestProfileHandler(t *testing.T) {
 		expectedStatus int
 	}{
 		{
-			name:           "1. Успешный запрос (DoD: корректный запрос → 202)",
+			name:           "invalid birth_date",
 			method:         http.MethodPost,
-			payload:        `{"user_id": "123e4567-e89b-12d3-a456-426614174000", "birth_date": "1990-01-01", "birth_place": "Moscow", "consent_given": true}`,
-			expectedStatus: http.StatusAccepted, // 202
+			payload:        `{"user_id":"123e4567-e89b-12d3-a456-426614174000","birth_date":"32-13-2024","birth_place":"Moscow","consent_given":true}`,
+			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name:           "2. Ошибка валидации даты (DoD: birth_date = '32-13-2024' → 400)",
+			name:           "missing user_id",
 			method:         http.MethodPost,
-			payload:        `{"user_id": "123e4567-e89b-12d3-a456-426614174000", "birth_date": "32-13-2024", "birth_place": "Moscow", "consent_given": true}`,
-			expectedStatus: http.StatusBadRequest, // 400
+			payload:        `{"birth_date":"1990-01-01","birth_place":"Moscow","consent_given":true}`,
+			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name:           "3. Отсутствует user_id (DoD: отсутствует user_id → 400)",
-			method:         http.MethodPost,
-			payload:        `{"birth_date": "1990-01-01", "birth_place": "Moscow", "consent_given": true}`,
-			expectedStatus: http.StatusBadRequest, // 400
-		},
-		{
-			name:           "4. Некорректный JSON",
+			name:           "malformed json",
 			method:         http.MethodPost,
 			payload:        `{bad json`,
-			expectedStatus: http.StatusBadRequest, // 400
+			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name:           "5. Неверный HTTP метод",
+			name:           "method not allowed",
 			method:         http.MethodGet,
-			payload:        ``,
-			expectedStatus: http.StatusMethodNotAllowed, // 405
+			payload:        "",
+			expectedStatus: http.StatusMethodNotAllowed,
 		},
 		{
-			name:           "6. Превышен лимит размера тела запроса",
+			name:           "body too large",
 			method:         http.MethodPost,
-			payload:        string(make([]byte, 1048577)), // Запрос больше 1 МБ
+			payload:        string(make([]byte, (1<<20)+1)),
 			expectedStatus: http.StatusBadRequest,
 		},
 	}
 
-	// Запускаем цикл по нашей таблице
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Формируем запрос
-			req, err := http.NewRequest(tt.method, "/api/v1/astro/profile", bytes.NewBufferString(tt.payload))
-			if err != nil {
-				t.Fatal(err)
-			}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-			// Создаем "диктофон" для записи ответа
+			ctrl := gomock.NewController(t)
+			publisher := msgmocks.NewMockMsgPublisher(ctrl)
+			requestsRepo := reqmocks.NewMockRepository(ctrl)
+			// ни publisher, ни requestsRepo не должны вызываться при плохом запросе
+
+			h := handlers.NewProfileHandler(publisher, requestsRepo, zap.NewNop())
+			req := httptest.NewRequest(tc.method, "/api/v1/astro/profile", bytes.NewBufferString(tc.payload))
 			rr := httptest.NewRecorder()
 
-			// Используем роутер chi для тестирования
-			r := chi.NewRouter()
-			r.Post("/api/v1/astro/profile", ProfileHandler)
-
-			// Выполняем запрос
-			r.ServeHTTP(rr, req)
-
-			// Проверяем статус-код
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("Сценарий '%s': получили статус %v, а ожидали %v", tt.name, status, tt.expectedStatus)
-			}
+			h.Handle(rr, req)
+			require.Equal(t, tc.expectedStatus, rr.Code)
 		})
 	}
+}
+
+func TestProfileHandler_PublishFailure(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+
+	publisher := msgmocks.NewMockMsgPublisher(ctrl)
+	requestsRepo := reqmocks.NewMockRepository(ctrl)
+
+	requestsRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	publisher.EXPECT().
+		PublishMessage(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(errors.New("nats down")).
+		Times(1)
+
+	h := handlers.NewProfileHandler(publisher, requestsRepo, zap.NewNop())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/profile", bytes.NewBufferString(validProfilePayload))
+	rr := httptest.NewRecorder()
+
+	h.Handle(rr, req)
+	require.Equal(t, http.StatusInternalServerError, rr.Code)
 }
