@@ -11,19 +11,19 @@ import (
 	"github.com/bradfitz/gomemcache/memcache"
 )
 
-type cacheRepo struct {
+type CacheRepo struct {
 	client *memcache.Client
 	ttl    int32
 }
 
-func NewCacheRepo(ttl time.Duration, servers []string) *cacheRepo {
-	return &cacheRepo{
+func NewCacheRepo(ttl time.Duration, servers []string) *CacheRepo {
+	return &CacheRepo{
 		client: memcache.New(servers...),
 		ttl:    int32(ttl.Seconds()),
 	}
 }
 
-func (r *cacheRepo) Save(ctx context.Context, data domain.PersonalData) error {
+func (r *CacheRepo) Save(ctx context.Context, data domain.PersonalData) error {
 	if data.UserID == "" {
 		return errors.New("UserID cannot be empty")
 	}
