@@ -44,6 +44,8 @@ func TestProfileHandler_Success(t *testing.T) {
 		Return(nil).
 		Times(1)
 
+	dbRepo.EXPECT().Save(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+
 	publisher.EXPECT().
 		PublishMessage(gomock.Any(), models.MsgStreamEvents, models.MsgProfileSubj, gomock.Any()).
 		Return(nil).
@@ -140,6 +142,7 @@ func TestProfileHandler_PublishFailure(t *testing.T) {
 	uc := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 
 	requestsRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	dbRepo.EXPECT().Save(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	publisher.EXPECT().
 		PublishMessage(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(errors.New("nats down")).
