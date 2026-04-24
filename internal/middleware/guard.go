@@ -24,10 +24,10 @@ func ConsentGuard(next http.Handler) http.Handler {
 			return
 		}
 
-		/*if !req.ConsentGiven {
-		    http.Error(w, "consent required", http.StatusForbidden)
-		    return
-		}*/
+		if !req.ConsentGiven {
+			http.Error(w, "consent required", http.StatusForbidden)
+			return
+		}
 
 		// Восстанавливаем тело для следующих обработчиков
 		r.Body = io.NopCloser(bytes.NewBuffer(body))

@@ -1,8 +1,8 @@
 package usecases
 
 import (
-	"astroapi/internal/repositories"
-	"astroapi/internal/repositories/domain"
+	"astroapi/internal/usecases/repositories"
+	"astroapi/internal/usecases/repositories/domain"
 	"context"
 )
 

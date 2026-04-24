@@ -17,6 +17,8 @@ import (
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
+	"astroapi/internal/usecases"
+	"astroapi/internal/usecases/repositories/domain"
 	"astroapi/internal/user"
 
 	"github.com/nats-io/nats-server/v2/server"
@@ -30,6 +32,18 @@ import (
 type memUserRepo struct {
 	mu    sync.Mutex
 	users map[string]user.User
+}
+
+type memPersonalDataRepo struct {
+	userRepo *memUserRepo
+}
+
+func (m *memPersonalDataRepo) Save(ctx context.Context, data domain.PersonalData) error {
+	return m.userRepo.Save(ctx, user.User{
+		UserID:       data.UserID,
+		BirthDate:    data.DOB,
+		ConsentGiven: data.ConsentGiven,
+	})
 }
 
 func newMemUserRepo() *memUserRepo { return &memUserRepo{users: map[string]user.User{}} }
@@ -155,6 +169,10 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	userRepo := newMemUserRepo()
 	reqRepo := newMemRequestsRepo()
 
+	dbRepo := &memPersonalDataRepo{userRepo: userRepo}
+	cacheRepo := &memPersonalDataRepo{userRepo: userRepo}
+	uc := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
+
 	profileProc := handlers.NewProfileProcessor(userRepo, reqRepo, logger)
 	router := handlers.NewMsgRouter(logger)
 	router.Register(models.MsgProfileSubj, profileProc)
@@ -165,7 +183,7 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 			return router.Dispatch(c, msg.Subject(), msg.Data())
 		}))
 
-	h := handlers.NewProfileHandler(publisher, reqRepo, logger)
+	h := handlers.NewProfileHandler(publisher, reqRepo, uc, logger)
 
 	body := []byte(`{
 		"user_id":"123e4567-e89b-12d3-a456-426614174000",

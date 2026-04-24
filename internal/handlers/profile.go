@@ -9,6 +9,8 @@ import (
 
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
+	"astroapi/internal/usecases"
+	"astroapi/internal/usecases/repositories/domain"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -42,15 +44,17 @@ func (req *ProfileRequest) Validate() map[string]string {
 
 // ProfileHandler обрабатывает POST /api/v1/astro/profile.
 // Действия: валидация → создать запись в requests_log (status=accepted) →
+// Сохраняем данный либо в БД, либо в memcached →
 // опубликовать событие в JetStream → вернуть 202 с request_id.
 type ProfileHandler struct {
 	publisher    MsgPublisher
 	requestsRepo requests.Repository
+	uc           *usecases.ProcessPersonalDataUseCase
 	logger       *zap.Logger
 }
 
-func NewProfileHandler(publisher MsgPublisher, requestsRepo requests.Repository, logger *zap.Logger) *ProfileHandler {
-	return &ProfileHandler{publisher: publisher, requestsRepo: requestsRepo, logger: logger}
+func NewProfileHandler(publisher MsgPublisher, requestsRepo requests.Repository, uc *usecases.ProcessPersonalDataUseCase, logger *zap.Logger) *ProfileHandler {
+	return &ProfileHandler{publisher: publisher, requestsRepo: requestsRepo, uc: uc, logger: logger}
 }
 
 func (h *ProfileHandler) Handle(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +94,20 @@ func (h *ProfileHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		h.logger.Error("failed to create requests_log entry", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "failed to create request")
+		return
+	}
+
+	err := h.uc.Execute(r.Context(), usecases.ProcessPersonalDataInput{
+		PersonalData: domain.PersonalData{
+			UserID:       req.UserID,
+			DOB:          req.BirthDate,
+			ConsentGiven: req.ConsentGiven,
+		},
+	})
+
+	if err != nil {
+		h.logger.Error("failed to process personal data", zap.Error(err))
+		writeError(w, http.StatusInternalServerError, "failed to process data")
 		return
 	}
 

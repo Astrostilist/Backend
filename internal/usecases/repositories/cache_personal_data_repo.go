@@ -1,7 +1,7 @@
 package repositories
 
 import (
-	"astroapi/internal/repositories/domain"
+	"astroapi/internal/usecases/repositories/domain"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,12 +25,12 @@ func NewCacheRepo(ttl time.Duration, servers []string) *cacheRepo {
 
 func (r *cacheRepo) Save(ctx context.Context, data domain.PersonalData) error {
 	if data.UserID == "" {
-		return errors.New("UserID не может быть пустым")
+		return errors.New("UserID cannot be empty")
 	}
 	key := fmt.Sprintf("personal_data:%s", data.UserID)
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		return fmt.Errorf("ошибка сериализации персональных данных: %w", err)
+		return fmt.Errorf("personal data serialization error: %w", err)
 	}
 	// Создаём запись в Memcached
 	item := &memcache.Item{
@@ -40,7 +40,7 @@ func (r *cacheRepo) Save(ctx context.Context, data domain.PersonalData) error {
 	}
 
 	if err := r.client.Set(item); err != nil {
-		return fmt.Errorf("ошибка сохранения memcached: %w", err)
+		return fmt.Errorf("memcached save error: %w", err)
 	}
 
 	return nil

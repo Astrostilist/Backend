@@ -2,7 +2,7 @@ package repositories
 
 import (
 	"astroapi/internal/crypto"
-	"astroapi/internal/repositories/domain"
+	"astroapi/internal/usecases/repositories/domain"
 	"context"
 	"database/sql"
 	"fmt"
@@ -27,7 +27,6 @@ func (r *dbPersonalDataRepo) Save(ctx context.Context, data domain.PersonalData)
 		return err
 	}
 	now := time.Now()
-	// сохраняем запись если такого пользователя нет, если пользователь с таким user_id уже есть, то редактируем запись
 	query := `INSERT INTO users (user_id, encrypted_dob, consent_given, created_at, updated_at)
               VALUES ($1, $2, $3, $4, $5)
               ON CONFLICT (user_id) DO UPDATE SET
@@ -35,7 +34,7 @@ func (r *dbPersonalDataRepo) Save(ctx context.Context, data domain.PersonalData)
               updated_at = EXCLUDED.updated_at;`
 	_, err = r.db.Exec(query, data.UserID, encryptedDob, data.ConsentGiven, now, now)
 	if err != nil {
-		return fmt.Errorf("ошибка добавление данных в таблицу users: %w", err)
+		return fmt.Errorf("error adding data to the users table: %w", err)
 	}
 	return nil
 }

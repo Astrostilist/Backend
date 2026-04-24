@@ -20,10 +20,10 @@ import (
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
-	"astroapi/internal/repositories"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
 	"astroapi/internal/usecases"
+	"astroapi/internal/usecases/repositories"
 	"astroapi/internal/user"
 
 	"github.com/go-chi/chi/v5"
@@ -84,23 +84,6 @@ func run() error {
 		}
 	}()
 
-	//Personal Data repositories
-	dbRepo := repositories.NewDBPersonalDataRepository(
-		db.DB,
-		encryptionKey,
-	)
-
-	cacheRepo := repositories.NewCacheRepo(
-		10*time.Minute,
-		[]string{cfg.MemcachedHost},
-	)
-	//UseCase
-	personalDataUC := usecases.NewProcessPersonalDataUseCase(
-		dbRepo,
-		cacheRepo,
-	)
-	_ = personalDataUC
-
 	// 2. NATS + JetStream
 	natsConn, err := natsinfra.InitNATS(rootCtx, zapLogger, cfg)
 	if err != nil {
@@ -125,10 +108,14 @@ func run() error {
 	publisher := natsinfra.NewMessagePublisher(jsAdapter, zapLogger)
 
 	// 3. Repositories
+	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
+	cacheRepo := repositories.NewCacheRepo(10*time.Minute, []string{cfg.MemcachedHost})
 	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
 	requestsRepo := requests.NewPostgresRepository(db.DB)
 	rulesRepo := rules.NewPostgresRepository(db.DB)
 
+	//Usecase
+	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 	// 4. AI client
 	aiClient := alisa.NewClient(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL)
 
@@ -167,7 +154,7 @@ func run() error {
 
 	// 6. HTTP handlers
 	helloHandler := handlers.NewHelloHandler(handlers.NewRealHelloService(db))
-	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, zapLogger)
+	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 
