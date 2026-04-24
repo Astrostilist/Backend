@@ -33,18 +33,19 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 }
 
 // Create - создание правила в БД.
-func (r *PostgresRepository) Create(ctx context.Context, input *RuleInput) (*Rule, error) {
+func (r *PostgresRepository) Create(ctx context.Context, input *RuleInput) (uuid.UUID, error) {
 	conditionJSON, tagsJSON, err := marshalRulePayload(*input)
 	if err != nil {
-		return nil, err
+		return uuid.Nil, err
 	}
 	quary := `
 			INSERT INTO astro_rules (name, astro_condition, product_tags, priority, is_active)
 			VALUES ($1, $2, $3, $4, $5)
-			RETURNING id, name, astro_condition, product_tags, priority, is_active, created_at, updated_at
+			RETURNING id
 		`
 
-	row := r.db.QueryRowContext(
+	var id string
+	err = r.db.QueryRowContext(
 		ctx,
 		quary,
 		input.Name,
@@ -52,14 +53,23 @@ func (r *PostgresRepository) Create(ctx context.Context, input *RuleInput) (*Rul
 		tagsJSON,
 		input.Priority,
 		input.IsActive,
-	)
+	).Scan(&id)
 
-	ruleItem, scanErr := scanRule(row)
-	if scanErr != nil {
-		return nil, scanErr
+	// ruleItem, scanErr := scanRule(row)
+	// if scanErr != nil {
+	// 	return nil, scanErr
+	// }
+
+	if err != nil {
+		return uuid.Nil, err
 	}
 
-	return &ruleItem, nil
+	parsedUUID, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	return parsedUUID, nil
 }
 
 // Get - получить конкретную запись из БД.

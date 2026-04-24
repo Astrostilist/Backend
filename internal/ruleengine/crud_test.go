@@ -93,14 +93,14 @@ func TestCreate(t *testing.T) {
 	rules := PostgresRepository{db}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			createdRule, err := rules.Create(ctx, &tt.input)
+			createdID, err := rules.Create(ctx, &tt.input)
 			require.NoError(t, err)
 
-			if createdRule.ID == uuid.Nil {
+			if createdID == uuid.Nil {
 				t.Error(t, "uuid is nil")
 			}
 
-			dbRule, err := rules.Get(createdRule.ID.String())
+			dbRule, err := rules.Get(createdID.String())
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.input.Name, dbRule.Name)
@@ -113,7 +113,7 @@ func TestCreate(t *testing.T) {
 				t.Errorf("slices ProductTags are not equal: \n\tWanted: %v . But get: %v", tt.input.ProductTags, dbRule.ProductTags)
 			}
 
-			err = rules.Delete(createdRule.ID.String())
+			err = rules.Delete(createdID.String())
 			require.NoError(t, err)
 		})
 	}
@@ -214,17 +214,17 @@ func TestUpdate(t *testing.T) {
 	rules := PostgresRepository{db}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			createdRule, err := rules.Create(ctx, &tt.input)
+			createdID, err := rules.Create(ctx, &tt.input)
 			require.NoError(t, err)
 
-			if createdRule.ID == uuid.Nil {
+			if createdID == uuid.Nil {
 				t.Error(t, "uuid is nil")
 			}
 
-			_, err = rules.Update(ctx, createdRule.ID.String(), &tt.wantUpdate)
+			_, err = rules.Update(ctx, createdID.String(), &tt.wantUpdate)
 			require.NoError(t, err)
 
-			dbRule, err := rules.Get(createdRule.ID.String())
+			dbRule, err := rules.Get(createdID.String())
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.wantUpdate.Name, dbRule.Name)
@@ -237,7 +237,7 @@ func TestUpdate(t *testing.T) {
 				t.Errorf("slices ProductTags are not equal: \n\tWanted: %v . But get: %v", tt.input.ProductTags, dbRule.ProductTags)
 			}
 
-			err = rules.Delete(createdRule.ID.String())
+			err = rules.Delete(createdID.String())
 			require.NoError(t, err)
 
 		})
@@ -409,9 +409,9 @@ func TestList(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var listID []uuid.UUID
 			for _, elem := range tt.input {
-				createdRule, err := rules.Create(ctx, &elem)
+				createdID, err := rules.Create(ctx, &elem)
 				require.NoError(t, err)
-				listID = append(listID, createdRule.ID)
+				listID = append(listID, createdID)
 			}
 
 			dbRules, mtdata, err := rules.List(ctx, tt.opt)
@@ -508,17 +508,17 @@ func TestDeactivate(t *testing.T) {
 	rules := PostgresRepository{db}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			createdRule, err := rules.Create(ctx, &tt.input)
+			createdID, err := rules.Create(ctx, &tt.input)
 			require.NoError(t, err)
 
-			if createdRule.ID == uuid.Nil {
+			if createdID == uuid.Nil {
 				t.Error(t, "uuid is nil")
 			}
 
-			_, err = rules.Deactivate(ctx, createdRule.ID.String())
+			_, err = rules.Deactivate(ctx, createdID.String())
 			require.NoError(t, err)
 
-			dbRule, err := rules.Get(createdRule.ID.String())
+			dbRule, err := rules.Get(createdID.String())
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.wantUpdate.Name, dbRule.Name)
@@ -531,7 +531,7 @@ func TestDeactivate(t *testing.T) {
 				t.Errorf("slices ProductTags are not equal: \n\tWanted: %v . But get: %v", tt.input.ProductTags, dbRule.ProductTags)
 			}
 
-			err = rules.Delete(createdRule.ID.String())
+			err = rules.Delete(createdID.String())
 			require.NoError(t, err)
 
 		})
@@ -604,14 +604,14 @@ func TestDelete(t *testing.T) {
 	rules := PostgresRepository{db}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			createdRule, err := rules.Create(ctx, &tt.input)
+			createdID, err := rules.Create(ctx, &tt.input)
 			require.NoError(t, err)
 
-			if createdRule.ID == uuid.Nil {
+			if createdID == uuid.Nil {
 				t.Error(t, "uuid is nil")
 			}
 
-			dbRule, err := rules.Get(createdRule.ID.String())
+			dbRule, err := rules.Get(createdID.String())
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.input.Name, dbRule.Name)
@@ -624,10 +624,10 @@ func TestDelete(t *testing.T) {
 				t.Errorf("slices ProductTags are not equal: \n\tWanted: %v . But get: %v", tt.input.ProductTags, dbRule.ProductTags)
 			}
 
-			err = rules.Delete(createdRule.ID.String())
+			err = rules.Delete(createdID.String())
 			require.NoError(t, err)
 
-			err = rules.Delete(createdRule.ID.String())
+			err = rules.Delete(createdID.String())
 			require.Error(t, err)
 		})
 	}

@@ -58,11 +58,11 @@ func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions)
 	}
 	return filtered[start:end], mtdata, nil
 }
-func (r *fakeRulesRepository) Create(_ context.Context, input *rules.RuleInput) (*rules.Rule, error) {
+func (r *fakeRulesRepository) Create(_ context.Context, input *rules.RuleInput) (uuid.UUID, error) {
 	now := time.Now().UTC()
 	smplID, err := uuid.Parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 	if err != nil {
-		return nil, err
+		return uuid.Nil, err
 	}
 	createdRule := rules.Rule{
 		ID:             smplID,
@@ -75,7 +75,7 @@ func (r *fakeRulesRepository) Create(_ context.Context, input *rules.RuleInput) 
 		UpdatedAt:      now,
 	}
 	r.items[createdRule.ID.String()] = createdRule
-	return &createdRule, nil
+	return smplID, nil
 }
 
 func (r *fakeRulesRepository) Update(_ context.Context, id string, input *rules.RuleInput) (*rules.Rule, error) {

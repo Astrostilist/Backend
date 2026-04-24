@@ -208,7 +208,6 @@ components:
                 type: string
               sign:
                 type: string
-          additionalProperties: true
         product_tags:
           type: array
           items:
@@ -239,7 +238,11 @@ components:
           type: string
         astro_condition:
           type: object
-          additionalProperties: true
+          properties:
+            planet:
+              type: string
+            sign:
+              type: string
         product_tags:
           type: array
           items:
@@ -274,12 +277,19 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/AdminRule"
-                limit:
-                  type: integer
-                offset:
-                  type: integer
-                total_count:
-                  type: integer
+                metadata:
+                  type: object
+                  properties:
+                    current_page:
+                      type: integer
+                    page_size:
+                      type: integer
+                    first_page:
+                      type: integer
+                    last_page:
+                      type: integer
+                    total_records:
+                      type: integer
     AdminRulesSingleEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"

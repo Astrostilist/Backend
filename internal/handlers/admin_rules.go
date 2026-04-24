@@ -43,7 +43,7 @@ type adminRulesListResponse struct {
 		FirstPage    int `json:"first_page,omitzero"`
 		LastPage     int `json:"last_page,omitzero"`
 		TotalRecords int `json:"total_records,omitzero"`
-	}
+	} `json:"metadata"`
 	// Limit      int `json:"limit"`
 	// Offset     int `json:"offset"`
 	// TotalCount int `json:"total_count"`

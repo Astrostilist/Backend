@@ -43,7 +43,7 @@ type ListResult struct {
 }
 
 type Repository interface {
-	Create(ctx context.Context, input *RuleInput) (*Rule, error)
+	Create(ctx context.Context, input *RuleInput) (uuid.UUID, error)
 	Get(id string) (*Rule, error)
 	Update(ctx context.Context, id string, input *RuleInput) (*Rule, error)
 	Delete(id string) error
