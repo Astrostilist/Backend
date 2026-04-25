@@ -45,11 +45,11 @@ type mockPersonalDataCache struct {
 	err error
 }
 
-func (m *mockPersonalDataCache) Set(ctx context.Context, data domain.PersonalData) error {
+func (m *mockPersonalDataCache) Save(ctx context.Context, data domain.PersonalData) error {
 	return m.err
 }
 
-func TestProfileHandler_Handle(t *testing.T) {
+func TestProfileHandler_HandleProfile(t *testing.T) {
 	tests := []struct {
 		name           string
 		method         string
@@ -119,7 +119,7 @@ func TestProfileHandler_Handle(t *testing.T) {
 				"user_id":       "123e4567-e89b-12d3-a456-426614174000",
 				"birth_date":    "1990-01-01",
 				"birth_place":   "Moscow",
-				"consent_given": true,
+				"consent_given": false,
 			},
 			mockCacheErr:   errors.New("cache failed"),
 			expectedStatus: http.StatusInternalServerError,
@@ -170,7 +170,7 @@ func TestProfileHandler_Handle(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
 
-			handler.Handle(rr, req)
+			handler.HandleProfile(rr, req)
 
 			if rr.Code != tt.expectedStatus {
 				t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, tt.expectedStatus)
