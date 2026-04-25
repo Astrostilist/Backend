@@ -1,61 +1,60 @@
-package handlers
+package handlers_test
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"astroapi/internal/handlers"
 	"astroapi/internal/handlers/mocks"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
 
-// TestHelloWorldHandler проверяет работу базового эндпоинта (БД подключена)
-func TestHelloWorldHandler(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	// Создаем МОК
-	mockService := mocks.NewMockHelloService(ctrl)
-
-	// ПРОГРАММИРУЕМ МОК:
-	mockService.EXPECT().GetDBStatus().Return("connected").Times(1)
-
-	handler := NewHelloHandler(mockService)
-
-	// Эмулируем HTTP-запрос
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/", nil)
-	rr := httptest.NewRecorder()
-
-	handler.HelloWorldHandler(rr, req)
-
-	// Проверяем, что хендлер не упал и вернул 200 OK
-	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("Ожидали статус %v, получили %v", http.StatusOK, status)
-	}
+func TestRealHelloService_NilDBReturnsNotInitialized(t *testing.T) {
+	t.Parallel()
+	svc := handlers.NewRealHelloService(nil)
+	require.Equal(t, "not initialized", svc.GetDBStatus(context.Background()))
 }
 
-// TestHelloWorldHandler_DBDisconnected проверяет работу, когда БД отключена
-func TestHelloWorldHandler_DBDisconnected(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+func TestHelloWorldHandler_StatusMap(t *testing.T) {
+	t.Parallel()
 
-	// Создаем МОК
-	mockService := mocks.NewMockHelloService(ctrl)
+	tests := []struct {
+		name       string
+		dbStatus   string
+		wantStatus string
+	}{
+		{name: "connected", dbStatus: "connected", wantStatus: "connected"},
+		{name: "disconnected", dbStatus: "disconnected", wantStatus: "disconnected"},
+		{name: "not initialized", dbStatus: "not initialized", wantStatus: "not initialized"},
+	}
 
-	// ПРОГРАММИРУЕМ МОК:
-	mockService.EXPECT().GetDBStatus().Return("disconnected").Times(1)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	handler := NewHelloHandler(mockService)
+			ctrl := gomock.NewController(t)
+			service := mocks.NewMockHelloService(ctrl)
+			service.EXPECT().GetDBStatus(gomock.Any()).Return(tc.dbStatus).Times(1)
 
-	// Эмулируем HTTP-запрос
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/", nil)
-	rr := httptest.NewRecorder()
+			handler := handlers.NewHelloHandler(service)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/", nil)
+			rr := httptest.NewRecorder()
 
-	handler.HelloWorldHandler(rr, req)
+			handler.HelloWorldHandler(rr, req)
 
-	// Проверяем, что хендлер не упал и вернул 200 OK
-	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("Ожидали статус %v, получили %v", http.StatusOK, status)
+			require.Equal(t, http.StatusOK, rr.Code)
+
+			var resp handlers.Response
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+			data, ok := resp.Data.(map[string]any)
+			require.True(t, ok, "expected data object")
+			require.Equal(t, tc.wantStatus, data["database_status"])
+		})
 	}
 }
