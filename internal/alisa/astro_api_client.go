@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"astroapi/config"
+	"astroapi/internal/metrics"
+	"astroapi/internal/resilience"
 
 	"github.com/nats-io/nats.go/jetstream"
 	"go.uber.org/zap"
@@ -65,12 +67,15 @@ type AstroAPIClient struct {
 	logger      *zap.Logger
 	cacheBucket string
 	cacheTTL    time.Duration
+	breaker     *resilience.CircuitBreaker
 }
 
 type AstroAPIClientOptions struct {
 	HTTPClient  *http.Client
 	CacheBucket string
 	CacheTTL    time.Duration
+	Metrics     *metrics.Registry
+	Breaker     *resilience.CircuitBreaker
 }
 
 type astroProfileEnvelope struct {
@@ -103,6 +108,11 @@ func NewAstroAPIClient(baseURL string, js jetstream.KeyValueManager, logger *zap
 		cache = jetStreamAstroCacheManager{manager: js}
 	}
 
+	breaker := opts.Breaker
+	if breaker == nil {
+		breaker = resilience.NewCircuitBreaker("astro_api", 5, 30*time.Second, logger, opts.Metrics)
+	}
+
 	return &AstroAPIClient{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		httpClient:  httpClient,
@@ -110,6 +120,7 @@ func NewAstroAPIClient(baseURL string, js jetstream.KeyValueManager, logger *zap
 		logger:      logger,
 		cacheBucket: cacheBucket,
 		cacheTTL:    cacheTTL,
+		breaker:     breaker,
 	}
 }
 
@@ -152,7 +163,11 @@ func (c *AstroAPIClient) GetAstroProfile(birthDate, birthPlace string) (AstroPro
 		}
 	}
 
-	profile, err := c.fetchProfile(ctx, birthDate, birthPlace)
+	err := c.breaker.Execute(func() error {
+		var fetchErr error
+		profile, fetchErr = c.fetchProfile(ctx, birthDate, birthPlace)
+		return fetchErr
+	})
 	if err != nil {
 		return profile, err
 	}
@@ -228,10 +243,10 @@ func (c *AstroAPIClient) fetchProfile(ctx context.Context, birthDate, birthPlace
 		return profile, fmt.Errorf("send astro API request: %w", err)
 	}
 	defer func() {
-        if err := response.Body.Close(); err != nil {
-            c.logger.Error("failed to close response body", zap.Error(err))
-        }
-    }()
+		if err := response.Body.Close(); err != nil {
+			c.logger.Error("failed to close response body", zap.Error(err))
+		}
+	}()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {

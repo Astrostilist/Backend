@@ -18,6 +18,7 @@ import (
 	"astroapi/internal/handlers"
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/logger"
+	"astroapi/internal/metrics"
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
@@ -115,8 +116,13 @@ func run() error {
 
 	//Usecase
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
+	metricsRegistry := metrics.NewRegistry()
 	// 4. AI client
-	aiClient := alisa.NewClient(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL)
+	aiClient := alisa.NewClientWithOptions(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL, alisa.ClientOptions{
+		Logger:     zapLogger,
+		Metrics:    metricsRegistry,
+		MaxRetries: 3,
+	})
 
 	// 5. Message router + processors (consumers)
 	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, zapLogger)
@@ -163,6 +169,7 @@ func run() error {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
+	r.Get("/metrics", metricsRegistry.Handler)
 	r.Post("/api/v1/astro/profile", profileHandler.Handle)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)

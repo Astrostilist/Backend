@@ -9,6 +9,7 @@ import (
 
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
+	"astroapi/internal/resilience"
 	"astroapi/internal/usecases"
 	"astroapi/internal/usecases/repositories/domain"
 
@@ -17,7 +18,7 @@ import (
 )
 
 const (
-	profileMaxBodyBytes = 1 << 20 // 1MB
+	profileMaxBodyBytes = 1 << 20
 	profileScenarioName = "profile"
 )
 
@@ -28,6 +29,23 @@ type ProfileRequest struct {
 	BirthTime    string `json:"birth_time,omitempty"`
 	BirthPlace   string `json:"birth_place"`
 	ConsentGiven bool   `json:"consent_given"`
+}
+
+// ProfileHandler обрабатывает POST /api/v1/astro/profile.
+// Действия: валидация → создать запись в requests_log (status=accepted) →
+// Сохраняем данный либо в БД, либо в memcached →
+// опубликовать событие в JetStream → вернуть 202 с request_id.
+type ProfileHandler struct {
+	publisher    MsgPublisher
+	requestsRepo requests.Repository
+	uc           *usecases.ProcessPersonalDataUseCase
+	logger       *zap.Logger
+}
+
+// profilePayload — сообщение в JetStream. Выделено структурой, чтобы его типизированно читал consumer.
+type profilePayload struct {
+	RequestID string         `json:"request_id"`
+	Profile   ProfileRequest `json:"profile"`
 }
 
 // Validate возвращает map ошибок валидации (field -> message).
@@ -42,19 +60,18 @@ func (req *ProfileRequest) Validate() map[string]string {
 	return errs
 }
 
-// ProfileHandler обрабатывает POST /api/v1/astro/profile.
-// Действия: валидация → создать запись в requests_log (status=accepted) →
-// Сохраняем данный либо в БД, либо в memcached →
-// опубликовать событие в JetStream → вернуть 202 с request_id.
-type ProfileHandler struct {
-	publisher    MsgPublisher
-	requestsRepo requests.Repository
-	uc           *usecases.ProcessPersonalDataUseCase
-	logger       *zap.Logger
-}
-
-func NewProfileHandler(publisher MsgPublisher, requestsRepo requests.Repository, uc *usecases.ProcessPersonalDataUseCase, logger *zap.Logger) *ProfileHandler {
-	return &ProfileHandler{publisher: publisher, requestsRepo: requestsRepo, uc: uc, logger: logger}
+func NewProfileHandler(
+	publisher MsgPublisher,
+	requestsRepo requests.Repository,
+	uc *usecases.ProcessPersonalDataUseCase,
+	logger *zap.Logger,
+) *ProfileHandler {
+	return &ProfileHandler{
+		publisher:    publisher,
+		requestsRepo: requestsRepo,
+		uc:           uc,
+		logger:       logger,
+	}
 }
 
 func (h *ProfileHandler) Handle(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +124,12 @@ func (h *ProfileHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		h.logger.Error("failed to process personal data", zap.Error(err))
+
+		if resilience.IsServiceUnavailable(err) {
+			writeError(w, http.StatusServiceUnavailable, "service unavailable")
+			return
+		}
+
 		writeError(w, http.StatusInternalServerError, "failed to process data")
 		return
 	}
@@ -119,10 +142,4 @@ func (h *ProfileHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"request_id": requestID})
-}
-
-// profilePayload — сообщение в JetStream. Выделено структурой, чтобы его типизированно читал consumer.
-type profilePayload struct {
-	RequestID string         `json:"request_id"`
-	Profile   ProfileRequest `json:"profile"`
 }

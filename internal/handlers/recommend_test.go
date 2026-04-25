@@ -14,6 +14,7 @@ import (
 	msgmocks "astroapi/internal/handlers/mocks"
 	"astroapi/internal/models"
 	reqmocks "astroapi/internal/requests/mocks"
+	"astroapi/internal/resilience"
 	rulemocks "astroapi/internal/ruleengine/mocks"
 	"astroapi/internal/user"
 	usermocks "astroapi/internal/user/mocks"
@@ -144,6 +145,29 @@ func TestRecommend_SyncAIError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.Handle(rr, req)
 	require.Equal(t, http.StatusBadGateway, rr.Code)
+}
+
+func TestRecommend_SyncReturns503WhenCircuitBreakerIsOpen(t *testing.T) {
+	t.Parallel()
+	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+
+	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	userRepo.EXPECT().Get(gomock.Any(), validUserID).Return(user.User{UserID: validUserID, BirthDate: "1990-01-01"}, nil).Times(1)
+	rulesRepo.EXPECT().Match(gomock.Any(), gomock.Any()).Return([]string{}, nil).Times(1)
+	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("", &resilience.ServiceUnavailableError{Service: "alisa_ai"}).Times(1)
+	reqRepo.EXPECT().UpdateStatus(gomock.Any(), gomock.Any(), "failed", gomock.Any(), gomock.Any()).Return(nil).Times(1)
+
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":  validUserID,
+		"scenario": "personal_style",
+		"mode":     "sync",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.Handle(rr, req)
+	require.Equal(t, http.StatusServiceUnavailable, rr.Code)
 }
 
 func TestRecommend_Validation(t *testing.T) {
