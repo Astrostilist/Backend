@@ -12,6 +12,8 @@ import (
 	msgmocks "astroapi/internal/handlers/mocks"
 	"astroapi/internal/models"
 	reqmocks "astroapi/internal/requests/mocks"
+	"astroapi/internal/usecases"
+	repomocks "astroapi/internal/usecases/repositories/mocks"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -31,18 +33,25 @@ func TestProfileHandler_Success(t *testing.T) {
 
 	publisher := msgmocks.NewMockMsgPublisher(ctrl)
 	requestsRepo := reqmocks.NewMockRepository(ctrl)
+	// Мокаем репозитории для usecase
+	dbRepo := repomocks.NewMockPersonalDataRepository(ctrl)
+	cacheRepo := repomocks.NewMockPersonalDataRepository(ctrl)
+	// Создаём реальный usecase с моками
+	uc := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 
 	requestsRepo.EXPECT().
 		Create(gomock.Any(), gomock.Any()).
 		Return(nil).
 		Times(1)
 
+	dbRepo.EXPECT().Save(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+
 	publisher.EXPECT().
 		PublishMessage(gomock.Any(), models.MsgStreamEvents, models.MsgProfileSubj, gomock.Any()).
 		Return(nil).
 		Times(1)
 
-	h := handlers.NewProfileHandler(publisher, requestsRepo, zap.NewNop())
+	h := handlers.NewProfileHandler(publisher, requestsRepo, uc, zap.NewNop())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/profile", bytes.NewBufferString(validProfilePayload))
 	rr := httptest.NewRecorder()
 
@@ -104,9 +113,13 @@ func TestProfileHandler_ValidationAndErrors(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			publisher := msgmocks.NewMockMsgPublisher(ctrl)
 			requestsRepo := reqmocks.NewMockRepository(ctrl)
-			// ни publisher, ни requestsRepo не должны вызываться при плохом запросе
+			// Мокаем репозитории для usecase
+			dbRepo := repomocks.NewMockPersonalDataRepository(ctrl)
+			cacheRepo := repomocks.NewMockPersonalDataRepository(ctrl)
+			// Создаём реальный usecase с моками
+			uc := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 
-			h := handlers.NewProfileHandler(publisher, requestsRepo, zap.NewNop())
+			h := handlers.NewProfileHandler(publisher, requestsRepo, uc, zap.NewNop())
 			req := httptest.NewRequest(tc.method, "/api/v1/astro/profile", bytes.NewBufferString(tc.payload))
 			rr := httptest.NewRecorder()
 
@@ -122,14 +135,20 @@ func TestProfileHandler_PublishFailure(t *testing.T) {
 
 	publisher := msgmocks.NewMockMsgPublisher(ctrl)
 	requestsRepo := reqmocks.NewMockRepository(ctrl)
+	// Мокаем репозитории для usecase
+	dbRepo := repomocks.NewMockPersonalDataRepository(ctrl)
+	cacheRepo := repomocks.NewMockPersonalDataRepository(ctrl)
+	// Создаём реальный usecase с моками
+	uc := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 
 	requestsRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	dbRepo.EXPECT().Save(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	publisher.EXPECT().
 		PublishMessage(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(errors.New("nats down")).
 		Times(1)
 
-	h := handlers.NewProfileHandler(publisher, requestsRepo, zap.NewNop())
+	h := handlers.NewProfileHandler(publisher, requestsRepo, uc, zap.NewNop())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/profile", bytes.NewBufferString(validProfilePayload))
 	rr := httptest.NewRecorder()
 
