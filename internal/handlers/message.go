@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"astroapi/internal/models"
 	"context"
 	"fmt"
 
@@ -17,6 +18,10 @@ type EventHandler interface {
 // MsgPublisher отправляет сообщения в JetStream.
 type MsgPublisher interface {
 	PublishMessage(ctx context.Context, streamName, subject string, payload any) error
+}
+
+type MsgDLQReader interface {
+	GetMessages(ctx context.Context) ([]models.Message, error)
 }
 
 // HandlerFunc — функциональный адаптер под EventHandler.

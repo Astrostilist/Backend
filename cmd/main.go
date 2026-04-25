@@ -147,6 +147,10 @@ func run() error {
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 
+	dlqreader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
+	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqreader, zapLogger)
+
+	// Настраиваем роутер chi и middleware (единый блок)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(astromidware.RequestLogger(zapLogger))
@@ -156,6 +160,11 @@ func run() error {
 	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
+
+	r.Group(func(r chi.Router) {
+		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))
+		r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
+	})
 
 	srv := &http.Server{
 		Addr:         ":8080",
