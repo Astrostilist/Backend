@@ -175,3 +175,79 @@ func TestRecommend_Validation(t *testing.T) {
 		})
 	}
 }
+func TestRecommend_SyncTimeout(t *testing.T) {
+	t.Parallel()
+	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+
+	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	userRepo.EXPECT().Get(gomock.Any(), validUserID).Return(user.User{UserID: validUserID}, nil).Times(1)
+	rulesRepo.EXPECT().Match(gomock.Any(), gomock.Any()).Return([]string{"style"}, nil).Times(1)
+
+	// Имитируем зависание нейросети и таймаут через 5 секунд
+	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("", context.DeadlineExceeded).Times(1)
+	reqRepo.EXPECT().UpdateStatus(gomock.Any(), gomock.Any(), "failed", gomock.Any(), gomock.Any()).Return(nil).Times(1)
+
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":  validUserID,
+		"scenario": "personal_style",
+		"mode":     "sync",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.Handle(rr, req)
+
+	// Проверяем, что хендлер вернул 504 Gateway Timeout
+	require.Equal(t, http.StatusGatewayTimeout, rr.Code)
+}
+
+func TestRecommend_InvalidJSON(t *testing.T) {
+	t.Parallel()
+	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader([]byte("invalid {")))
+	rr := httptest.NewRecorder()
+	h.Handle(rr, req)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestRecommend_DBCreateError(t *testing.T) {
+	t.Parallel()
+	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+
+	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("db is down")).Times(1)
+
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":  validUserID,
+		"scenario": "personal_style",
+		"mode":     "async",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.Handle(rr, req)
+	require.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestRecommend_AsyncPublishError(t *testing.T) {
+	t.Parallel()
+	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+
+	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	pub.EXPECT().PublishMessage(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("nats down")).Times(1)
+
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":  validUserID,
+		"scenario": "personal_style",
+		"mode":     "async",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.Handle(rr, req)
+	require.Equal(t, http.StatusInternalServerError, rr.Code)
+}
