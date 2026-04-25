@@ -48,7 +48,7 @@ func (r *Registry) Render() string {
 	builder.WriteString("# HELP circuit_breaker_state Current state of the circuit breaker (0=closed, 1=open, 2=half-open)\n")
 	builder.WriteString("# TYPE circuit_breaker_state gauge\n")
 	for _, service := range services {
-		builder.WriteString(fmt.Sprintf("circuit_breaker_state{service=\"%s\"} %d\n", service, r.states[service]))
+		builder.WriteString(fmt.Sprintf("circuit_breaker_state{service=%q} %d\n", service, r.states[service]))
 	}
 	return builder.String()
 }
