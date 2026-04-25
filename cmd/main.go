@@ -20,6 +20,7 @@ import (
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
+	"astroapi/internal/products"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
 	"astroapi/internal/user"
@@ -109,6 +110,7 @@ func run() error {
 	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
 	requestsRepo := requests.NewPostgresRepository(db.DB)
 	rulesRepo := rules.NewPostgresRepository(db.DB)
+	productsRepo := products.NewPostgresRepository(db.DB)
 
 	// 4. AI client
 	aiClient := alisa.NewClient(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL)
@@ -151,6 +153,7 @@ func run() error {
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
+	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -161,6 +164,7 @@ func run() error {
 	r.Post("/api/v1/astro/profile", profileHandler.Handle)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
+	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
 
 	srv := &http.Server{
 		Addr:         ":8080",
