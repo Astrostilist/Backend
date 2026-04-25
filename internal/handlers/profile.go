@@ -98,7 +98,9 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]string{"request_id": requestID})
+	if err := json.NewEncoder(w).Encode(map[string]string{"request_id": requestID}); err != nil {
+		h.logger.Error("failed to encode profile response", zap.Error(err))
+	}
 }
 
 type profilePayload struct {
