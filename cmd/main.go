@@ -22,13 +22,10 @@ import (
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
-	"astroapi/internal/usecases"
-	"astroapi/internal/usecases/repositories"
 	"astroapi/internal/user"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-
 	"github.com/nats-io/nats.go/jetstream"
 	"go.uber.org/zap"
 )
@@ -72,7 +69,6 @@ func run() error {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 
-	// 1. Database
 	db, err := database.New(rootCtx, cfg)
 	if err != nil {
 		return err
@@ -83,7 +79,6 @@ func run() error {
 		}
 	}()
 
-	// 2. NATS + JetStream
 	natsConn, err := natsinfra.InitNATS(rootCtx, zapLogger, cfg)
 	if err != nil {
 		return err
@@ -106,19 +101,12 @@ func run() error {
 
 	publisher := natsinfra.NewMessagePublisher(jsAdapter, zapLogger)
 
-	// 3. Repositories
-	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
-	cacheRepo := repositories.NewCacheRepo(10*time.Minute, []string{cfg.MemcachedHost})
 	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
 	requestsRepo := requests.NewPostgresRepository(db.DB)
 	rulesRepo := rules.NewPostgresRepository(db.DB)
 
-	//Usecase
-	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
-	// 4. AI client
 	aiClient := alisa.NewClient(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL)
 
-	// 5. Message router + processors (consumers)
 	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, zapLogger)
 	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, zapLogger)
 
@@ -151,9 +139,11 @@ func run() error {
 		<-rootCtx.Done()
 	}()
 
-	// 6. HTTP handlers
+	// --- HTTP Handlers ---
 	helloHandler := handlers.NewHelloHandler(handlers.NewRealHelloService(db))
-	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
+
+	// Здесь теперь передаются все 3 нужных аргумента
+	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 
@@ -163,7 +153,7 @@ func run() error {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
-	r.Post("/api/v1/astro/profile", profileHandler.Handle)
+	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 
@@ -175,7 +165,6 @@ func run() error {
 		IdleTimeout:  httpIdleTimeout,
 	}
 
-	// 7. Run HTTP server
 	serverErr := make(chan error, 1)
 	go func() {
 		zapLogger.Info("app starting", zap.String("addr", srv.Addr))
@@ -185,7 +174,6 @@ func run() error {
 		close(serverErr)
 	}()
 
-	// 8. Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	select {
@@ -203,7 +191,7 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		zapLogger.Error("server shutdown error", zap.Error(err))
 	}
-	rootCancel() // stop consumers
+	rootCancel()
 	wg.Wait()
 
 	zapLogger.Info("server exited")

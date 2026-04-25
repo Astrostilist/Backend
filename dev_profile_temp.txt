@@ -19,6 +19,7 @@ const (
 	profileScenarioName = "profile"
 )
 
+// ProfileRequest — payload POST /api/v1/astro/profile.
 type ProfileRequest struct {
 	UserID       string `json:"user_id"`
 	BirthDate    string `json:"birth_date"`
@@ -27,6 +28,7 @@ type ProfileRequest struct {
 	ConsentGiven bool   `json:"consent_given"`
 }
 
+// Validate возвращает map ошибок валидации (field -> message).
 func (req *ProfileRequest) Validate() map[string]string {
 	errs := make(map[string]string)
 	if _, err := uuid.Parse(req.UserID); err != nil {
@@ -38,18 +40,20 @@ func (req *ProfileRequest) Validate() map[string]string {
 	return errs
 }
 
+// ProfileHandler обрабатывает POST /api/v1/astro/profile.
+// Действия: валидация → создать запись в requests_log (status=accepted) →
+// опубликовать событие в JetStream → вернуть 202 с request_id.
 type ProfileHandler struct {
 	publisher    MsgPublisher
 	requestsRepo requests.Repository
 	logger       *zap.Logger
 }
 
-// Теперь функция снова ждет 3 аргумента, и тесты перестанут краснеть!
 func NewProfileHandler(publisher MsgPublisher, requestsRepo requests.Repository, logger *zap.Logger) *ProfileHandler {
 	return &ProfileHandler{publisher: publisher, requestsRepo: requestsRepo, logger: logger}
 }
 
-func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
+func (h *ProfileHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -96,13 +100,10 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	if err := json.NewEncoder(w).Encode(map[string]string{"request_id": requestID}); err != nil {
-		h.logger.Error("failed to encode profile response", zap.Error(err))
-	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"request_id": requestID})
 }
 
+// profilePayload — сообщение в JetStream. Выделено структурой, чтобы его типизированно читал consumer.
 type profilePayload struct {
 	RequestID string         `json:"request_id"`
 	Profile   ProfileRequest `json:"profile"`
