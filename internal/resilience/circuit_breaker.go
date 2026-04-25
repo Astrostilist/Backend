@@ -171,13 +171,14 @@ func (cb *CircuitBreaker) reportStateLocked(state int) {
 }
 
 func stateName(state int) string {
-	name := "unknown"
-	if state == StateClosed {
-		name = "closed"
-	} else if state == StateOpen {
-		name = "open"
-	} else if state == StateHalfOpen {
-		name = "half_open"
+	switch state {
+	case StateClosed:
+		return "closed"
+	case StateOpen:
+		return "open"
+	case StateHalfOpen:
+		return "half_open"
+	default:
+		return "unknown"
 	}
-	return name
 }
