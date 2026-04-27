@@ -18,14 +18,12 @@ type NATSConn struct {
 	logger *zap.Logger
 }
 
-var (
-	backOff = [4]time.Duration{
-		time.Duration(5 * time.Second),
-		time.Duration(30 * time.Second),
-		time.Duration(5 * time.Minute),
-		time.Duration(1 * time.Hour),
-	}
-)
+var backOff = [4]time.Duration{
+	5 * time.Second,
+	30 * time.Second,
+	5 * time.Minute,
+	1 * time.Hour,
+}
 
 func InitNATS(ctx context.Context, logger *zap.Logger, cfg *config.Config) (*NATSConn, error) {
 	opts := []nats.Option{
@@ -84,7 +82,7 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 			MaxConsumers: -1,
 			MaxMsgs:      -1,
 			MaxBytes:     -1,
-			Duplicates:   time.Duration(2 * time.Minute),
+			Duplicates:   2 * time.Minute,
 			Storage:      0,
 			Replicas:     1,
 		},
@@ -95,7 +93,7 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 			MaxConsumers: -1,
 			MaxMsgs:      100000,
 			MaxBytes:     100 << 20,
-			Duplicates:   time.Duration(30 * time.Second),
+			Duplicates:   30 * time.Second,
 			Storage:      0,
 			Replicas:     1,
 		},
@@ -109,22 +107,22 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 
 	consumersCfg := []jetstream.ConsumerConfig{
 		{
-			Name:           models.MsgProfileWrk,
-			FilterSubjects: []string{fmt.Sprint(models.MsgProfileSubj, ".>")},
+			Name: models.MsgProfileWrk,
+			// точный subject + (опциональный) хвост на будущее: `astro.events.profile`
+			// и любые `astro.events.profile.*` (fan-out по request_id и т.п.)
+			FilterSubjects: []string{models.MsgProfileSubj, fmt.Sprint(models.MsgProfileSubj, ".>")},
 			AckPolicy:      jetstream.AckExplicitPolicy,
-			MaxDeliver:     models.MsgSMaxRetries,
 			ReplayPolicy:   jetstream.ReplayInstantPolicy,
-			AckWait:        time.Duration(30 * time.Second),
+			AckWait:        30 * time.Second,
 			MaxAckPending:  1000,
 			BackOff:        backOff[:],
 		},
 		{
 			Name:           models.MsgRecommendWrk,
-			FilterSubjects: []string{fmt.Sprint(models.MsgRecommendSubj, ".>")},
+			FilterSubjects: []string{models.MsgRecommendSubj, fmt.Sprint(models.MsgRecommendSubj, ".>")},
 			AckPolicy:      jetstream.AckExplicitPolicy,
-			MaxDeliver:     models.MsgSMaxRetries,
 			ReplayPolicy:   jetstream.ReplayInstantPolicy,
-			AckWait:        time.Duration(30 * time.Second),
+			AckWait:        30 * time.Second,
 			MaxAckPending:  1000,
 			BackOff:        backOff[:],
 		},
@@ -136,7 +134,28 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 		}
 	}
 
-	return nil
+	_, err := r.initDLQConsumer(ctx)
+	return err
+
+}
+
+func (r *JetStreamAdapter) initDLQConsumer(ctx context.Context) (jetstream.Consumer, error) {
+
+	var consumer jetstream.Consumer
+	var err error
+
+	consumerCfg := jetstream.ConsumerConfig{
+		Name:              models.MsgDQLViewer,
+		FilterSubjects:    []string{fmt.Sprint(models.MsgProfileSubj, ".>"), fmt.Sprint(models.MsgRecommendSubj, ".>")},
+		DeliverPolicy:     jetstream.DeliverLastPolicy,
+		AckPolicy:         jetstream.AckExplicitPolicy,
+		ReplayPolicy:      jetstream.ReplayInstantPolicy,
+		InactiveThreshold: 60 * time.Minute, // Авто-удаление если не используется
+	}
+	if consumer, err = r.CreateOrUpdateConsumer(ctx, models.MsgStreamDLQ, consumerCfg); err != nil {
+		return nil, fmt.Errorf("failed to create consumer %s: %w", consumerCfg.Name, err)
+	}
+	return consumer, nil
 }
 
 func (r *JetStreamAdapter) publishMsg(ctx context.Context, subject, streamName string, payload []byte) error {
@@ -166,8 +185,8 @@ func (r *JetStreamAdapter) publishToDLQ(ctx context.Context, originalMsg jetstre
 		Header: nats.Header{
 			"original_subject": {subject},
 			"original_msg_id":  {strconv.FormatUint(id, 10)},
-			"Failure-Reason":   {reason},
-			"Timestamp":        {time.Now().UTC().Format(time.RFC3339)},
+			"failure_reason":   {reason},
+			"timestamp":        {time.Now().UTC().Format(time.RFC3339)},
 		},
 	}
 

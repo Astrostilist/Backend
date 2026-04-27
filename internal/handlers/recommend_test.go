@@ -1,112 +1,177 @@
-package handlers
+package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/go-chi/chi/v5"
+	almocks "astroapi/internal/alisa/mocks"
+	"astroapi/internal/handlers"
+	msgmocks "astroapi/internal/handlers/mocks"
+	"astroapi/internal/models"
+	reqmocks "astroapi/internal/requests/mocks"
+	rulemocks "astroapi/internal/ruleengine/mocks"
+	"astroapi/internal/user"
+	usermocks "astroapi/internal/user/mocks"
+
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"go.uber.org/zap"
 )
 
-func TestRecommendHandler(t *testing.T) {
-	// Создаем "таблицу" тест-кейсов
+const validUserID = "123e4567-e89b-12d3-a456-426614174000"
+
+func newRecommendDeps(t *testing.T) (
+	*msgmocks.MockMsgPublisher,
+	*usermocks.MockRepository,
+	*rulemocks.MockRepository,
+	*almocks.MockGenerator,
+	*reqmocks.MockRepository,
+) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	return msgmocks.NewMockMsgPublisher(ctrl),
+		usermocks.NewMockRepository(ctrl),
+		rulemocks.NewMockRepository(ctrl),
+		almocks.NewMockGenerator(ctrl),
+		reqmocks.NewMockRepository(ctrl)
+}
+
+func TestRecommend_AsyncPublishesToNATS(t *testing.T) {
+	t.Parallel()
+	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+
+	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	pub.EXPECT().
+		PublishMessage(gomock.Any(), models.MsgStreamEvents, models.MsgRecommendSubj, gomock.Any()).
+		Return(nil).
+		Times(1)
+
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":  validUserID,
+		"scenario": "personal_style",
+		"mode":     "async",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	h.Handle(rr, req)
+	require.Equal(t, http.StatusAccepted, rr.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	require.NotEmpty(t, resp["request_id"])
+}
+
+func TestRecommend_SyncCallsAIAndReturnsResult(t *testing.T) {
+	t.Parallel()
+	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+
+	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	userRepo.EXPECT().Get(gomock.Any(), validUserID).Return(user.User{
+		UserID:    validUserID,
+		BirthDate: "1990-01-01",
+	}, nil).Times(1)
+	rulesRepo.EXPECT().Match(gomock.Any(), gomock.Any()).Return([]string{"luxury"}, nil).Times(1)
+	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("sample recommendation", nil).Times(1)
+	reqRepo.EXPECT().UpdateStatus(gomock.Any(), gomock.Any(), "completed", gomock.Any(), "").Return(nil).Times(1)
+
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":  validUserID,
+		"scenario": "perfect_gift",
+		"mode":     "sync",
+		"context":  map[string]any{"triggers": []string{"Полнолуние"}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	h.Handle(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	require.Equal(t, "sample recommendation", resp["result"])
+	require.NotEmpty(t, resp["request_id"])
+}
+
+func TestRecommend_SyncUserNotFound(t *testing.T) {
+	t.Parallel()
+	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+
+	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	userRepo.EXPECT().Get(gomock.Any(), validUserID).Return(user.User{}, user.ErrNotFound).Times(1)
+	reqRepo.EXPECT().UpdateStatus(gomock.Any(), gomock.Any(), "failed", gomock.Any(), gomock.Any()).Return(nil).Times(1)
+
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":  validUserID,
+		"scenario": "personal_style",
+		"mode":     "sync",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.Handle(rr, req)
+	require.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestRecommend_SyncAIError(t *testing.T) {
+	t.Parallel()
+	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+
+	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	userRepo.EXPECT().Get(gomock.Any(), validUserID).Return(user.User{UserID: validUserID, BirthDate: "1990-01-01"}, nil).Times(1)
+	rulesRepo.EXPECT().Match(gomock.Any(), gomock.Any()).Return([]string{}, nil).Times(1)
+	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("", errors.New("boom")).Times(1)
+	reqRepo.EXPECT().UpdateStatus(gomock.Any(), gomock.Any(), "failed", gomock.Any(), gomock.Any()).Return(nil).Times(1)
+
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":  validUserID,
+		"scenario": "personal_style",
+		"mode":     "sync",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.Handle(rr, req)
+	require.Equal(t, http.StatusBadGateway, rr.Code)
+}
+
+func TestRecommend_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
-		name           string
-		method         string
-		body           map[string]interface{}
-		expectedStatus int
+		name    string
+		payload map[string]any
 	}{
-		{
-			// DoD: Тест: невалидный scenario → 400
-			name:   "Невалидный scenario -> 400",
-			method: http.MethodPost,
-			body: map[string]interface{}{
-				"user_id":  "123e4567-e89b-12d3-a456-426614174000",
-				"scenario": "bad_scenario", // Специально делаем ошибку
-			},
-			expectedStatus: http.StatusBadRequest, // 400
-		},
-		{
-			// DoD: Тест: корректный запрос async → 202 + request_id
-			name:   "Корректный запрос async -> 202",
-			method: http.MethodPost,
-			body: map[string]interface{}{
-				"user_id":  "123e4567-e89b-12d3-a456-426614174000",
-				"scenario": "personal_style",
-				"mode":     "async",
-			},
-			expectedStatus: http.StatusAccepted, // 202
-		},
-		{
-			// DoD: Таймаут sync-режима не зависает дольше 5 секунд
-			name:   "Sync-режим отрабатывает (имитация 2 сек)",
-			method: http.MethodPost,
-			body: map[string]interface{}{
-				"user_id":  "123e4567-e89b-12d3-a456-426614174000",
-				"scenario": "perfect_gift",
-				"mode":     "sync",
-			},
-			expectedStatus: http.StatusOK, // У нас стоит заглушка на 200 OK через 2 секунды
-		},
-		{
-			// DoD: Тест: невалидный mode -> 400
-			name:   "Невалидный режим работы (mode) -> 400",
-			method: http.MethodPost,
-			body: map[string]interface{}{
-				"user_id":  "123e4567-e89b-12d3-a456-426614174000",
-				"scenario": "personal_style",
-				"mode":     "wrong_mode", // Специально передаем мусор
-			},
-			expectedStatus: http.StatusBadRequest,
-		},
+		{name: "bad scenario", payload: map[string]any{"user_id": validUserID, "scenario": "bad"}},
+		{name: "bad mode", payload: map[string]any{"user_id": validUserID, "scenario": "personal_style", "mode": "wrong"}},
+		{name: "bad user_id", payload: map[string]any{"user_id": "not-uuid", "scenario": "personal_style"}},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Упаковываем тестовые данные в JSON
-			bodyBytes, _ := json.Marshal(tt.body)
-			req := httptest.NewRequest(tt.method, "/api/v1/astro/recommend", bytes.NewBuffer(bodyBytes))
-			req.Header.Set("Content-Type", "application/json")
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+			_ = context.Background()
+			// ни один зависимый мок не должен быть вызван
+			h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
 
-			// Создаем "шпиона" (Recorder), который запишет ответ сервера
+			body, _ := json.Marshal(tc.payload)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
 			rr := httptest.NewRecorder()
-
-			// Засекаем время (важно для проверки таймаута!)
-			start := time.Now()
-
-			// Заворачиваем функцию в роутер и вызываем
-			r := chi.NewRouter()
-			r.Post("/api/v1/astro/recommend", RecommendHandler)
-			r.ServeHTTP(rr, req)
-
-			// Считаем, сколько времени занял запрос
-			duration := time.Since(start)
-
-			// Проверяем статус-код
-			if rr.Code != tt.expectedStatus {
-				t.Errorf("Ожидался статус %d, получен %d. Тело: %s", tt.expectedStatus, rr.Code, rr.Body.String())
-			}
-
-			// Специфичные проверки
-			if tt.name == "Корректный запрос async -> 202" {
-				var response map[string]string
-				err := json.Unmarshal(rr.Body.Bytes(), &response)
-				if err != nil {
-					t.Fatalf("Failed to unmarshal response: %v", err)
-				}
-
-				if response["request_id"] == "" {
-					t.Errorf("Ожидался request_id в ответе, но он пустой")
-				}
-			}
-
-			// Проверка для DoD: не дольше 5 секунд
-			if duration > 5*time.Second {
-				t.Errorf("Запрос завис дольше 5 секунд! Заняло: %v", duration)
-			}
+			h.Handle(rr, req)
+			require.Equal(t, http.StatusBadRequest, rr.Code)
 		})
 	}
 }

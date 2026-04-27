@@ -14,6 +14,7 @@ type Config struct {
 	LogServiceName string
 	LogLevel       string
 	AdminToken     string
+	EncryptionKey  string
 
 	MemcachedHost string
 
@@ -42,25 +43,28 @@ type Config struct {
 	NATSClientID  string
 
 	// AI
-	AIBaseURL  string
-	AIAPIKey   string
-	AIModelURL string
+	AIBaseURL   string
+	AIAPIKey    string
+	AIModelURL  string
+	AstroAPIURL string
 }
 
+// Load читает переменные окружения. .env-файл подхватывается один раз здесь,
+// если он есть; в продакшене переменные приходят из окружения/секретов.
 func Load() *Config {
-	err := godotenv.Load()
-	if err != nil {
-		log.Println("Warning: .env file not found, using environment variables")
+	if err := godotenv.Load(); err != nil {
+		log.Println("warning: .env file not found, using environment variables")
 	}
 
 	return &Config{
 		LogServiceName: getEnv("LOG_SERVICE_NAME", "astro-backend"),
-		LogLevel:       getEnv("LOG_LEVEL", "INFO"),
+		LogLevel:       getEnv("LOG_LEVEL", "info"),
 
 		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
 		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
 
-		AdminToken: getEnv("ADMIN_TOKEN", ""),
+		AdminToken:    getEnv("ADMIN_TOKEN", ""),
+		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
 
 		MemcachedHost: getEnv("MEMCACHED_HOST", "localhost:11211"),
 
@@ -68,7 +72,7 @@ func Load() *Config {
 		DBPort:     getEnv("DB_PORT", "5432"),
 		DBUser:     getEnv("DB_USER", "postgres"),
 		DBPassword: getEnv("DB_PASSWORD", ""),
-		DBName:     getEnv("DB_NAME", "myapi_db"),
+		DBName:     getEnv("DB_NAME", "astrobackend"),
 		DBSSLMode:  getEnv("DB_SSL_MODE", "disable"),
 
 		DBMaxConns:          getEnvAsInt32("DB_MAX_CONNS", 50),
@@ -82,9 +86,10 @@ func Load() *Config {
 		NATSClusterID: getEnv("NATS_CLUSTER_ID", "test-cluster"),
 		NATSClientID:  getEnv("NATS_CLIENT_ID", "astro-backend"),
 
-		AIBaseURL:  getEnv("AI_BASE_URL", "https://ai.api.cloud.yandex.net/v1"),
-		AIAPIKey:   getEnv("AI_API_KEY", ""),
-		AIModelURL: getEnv("AI_MODEL_URL", ""),
+		AIBaseURL:   getEnv("AI_BASE_URL", "https://ai.api.cloud.yandex.net/v1"),
+		AIAPIKey:    getEnv("AI_API_KEY", ""),
+		AIModelURL:  getEnv("AI_MODEL_URL", ""),
+		AstroAPIURL: getEnv("ASTRO_API_URL", ""),
 	}
 }
 
