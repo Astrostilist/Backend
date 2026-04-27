@@ -263,14 +263,8 @@ components:
         name:
           type: string
         astro_condition:
-          type: array
-          items:
-            type: object
-            properties:
-              planet:
-                type: string
-              sign:
-                type: string
+          type: object
+          additionalProperties: true
         product_tags:
           type: array
           items:
@@ -301,11 +295,7 @@ components:
           type: string
         astro_condition:
           type: object
-          properties:
-            planet:
-              type: string
-            sign:
-              type: string
+          additionalProperties: true
         product_tags:
           type: array
           items:

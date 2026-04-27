@@ -7,25 +7,20 @@ import (
 	"github.com/google/uuid"
 )
 
-type AstroCondition struct {
-	Planet string `json:"planet"`
-	Sign   string `json:"sign"`
-}
-
 type Rule struct {
-	ID             uuid.UUID        `json:"id,omitzero"`
-	Name           string           `json:"name,omitzero"`
-	AstroCondition []AstroCondition `json:"astro_condition,omitzero"`
-	ProductTags    []string         `json:"product_tags,omitzero"`
-	Priority       int              `json:"priority,omitzero"`
-	IsActive       bool             `json:"is_active,omitzero"`
-	CreatedAt      time.Time        `json:"created_at,omitzero"`
-	UpdatedAt      time.Time        `json:"updated_at,omitzero"`
+	ID             uuid.UUID         `json:"id,omitzero"`
+	Name           string            `json:"name,omitzero"`
+	AstroCondition map[string]string `json:"astro_condition,omitzero"`
+	ProductTags    []string          `json:"product_tags,omitzero"`
+	Priority       int               `json:"priority,omitzero"`
+	IsActive       bool              `json:"is_active,omitzero"`
+	CreatedAt      time.Time         `json:"created_at,omitzero"`
+	UpdatedAt      time.Time         `json:"updated_at,omitzero"`
 }
 
 type RuleInput struct {
 	Name           string
-	AstroCondition []AstroCondition
+	AstroCondition map[string]string
 	ProductTags    []string
 	Priority       int
 	IsActive       bool
@@ -41,12 +36,11 @@ type ListResult struct {
 	Items      []Rule
 	TotalCount int
 }
-
 type Repository interface {
 	Create(ctx context.Context, input *RuleInput) (uuid.UUID, error)
 	Get(ctx context.Context, id string) (*Rule, error)
 	Update(ctx context.Context, id string, input *RuleInput) (uuid.UUID, error)
-	Delete(id string) error
+	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, options ListOptions) ([]*Rule, Metadata, error)
 	Deactivate(ctx context.Context, id string) (*Rule, error)
 	Match(ctx context.Context, triggers []string) ([]string, error)

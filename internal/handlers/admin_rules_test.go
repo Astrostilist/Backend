@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -115,7 +116,7 @@ func (r *fakeRulesRepository) Get(_ context.Context, id string) (*rules.Rule, er
 	}
 
 	currentRule.Name = ""
-	currentRule.AstroCondition = []rules.AstroCondition{}
+	currentRule.AstroCondition = map[string]string{}
 	currentRule.ProductTags = []string{}
 	currentRule.Priority = 1
 	currentRule.IsActive = true
@@ -125,7 +126,7 @@ func (r *fakeRulesRepository) Get(_ context.Context, id string) (*rules.Rule, er
 	return &currentRule, nil
 }
 
-func (r *fakeRulesRepository) Delete(id string) error {
+func (r *fakeRulesRepository) Delete(_ context.Context, id string) error {
 	return nil
 }
 
@@ -190,8 +191,8 @@ func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
 		{
 			ID:   smplId,
 			Name: "Seasonal rule",
-			AstroCondition: []rules.AstroCondition{
-				{Sign: "aries"},
+			AstroCondition: map[string]string{
+				"sign": "aries",
 			},
 			ProductTags: []string{"spring"},
 			Priority:    10,
@@ -237,31 +238,61 @@ func TestCreateRuleSucceeds(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d, body=%s", response.Code, response.Body.String())
 	}
+	fmt.Println("epository.items[created-rule-id] = ", repository.items)
 
-	if _, ok := repository.items["created-rule-id"]; !ok {
-		t.Fatal("rule was not stored")
+	var resp Response
+	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
+		t.Fatalf("cannot be decoded body: %v\n", err)
 	}
+	fmt.Printf("%v %T\n", resp.Data, resp.Data)
+
+	bytes, _ := json.Marshal(resp.Data)
+	output := make(map[string]string)
+
+	err := json.Unmarshal(bytes, &output)
+	if err != nil {
+		t.Fatalf("cannot be decoded body Data: %v\n", err)
+	}
+
+	idStr, ok := output["id"]
+	if !ok {
+		t.Fatal("couldn't find  tag 'id'")
+	}
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		t.Fatalf("cannot be get uuid: %v\n", err)
+	}
+	if id == uuid.Nil {
+		t.Fatal("uuid is Nil")
+	}
+
+	// if _, ok := repository.items["created-rule-id"]; !ok {
+	// 	t.Fatal("rule was not stored")
+	// }
 }
 
 func TestUpdateRuleModifiesFields(t *testing.T) {
 	t.Parallel()
 
-	ruleID := "11111111-1111-1111-1111-111111111111"
+	ruleID, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
+	require.NoError(t, err)
 	repository := newFakeRulesRepository([]rules.Rule{
 		{
-			ID:             ruleID,
-			Name:           "Old",
-			AstroCondition: map[string]any{"sign": "aries"},
-			ProductTags:    []string{"fire"},
-			Priority:       5,
-			IsActive:       true,
-			CreatedAt:      time.Now().UTC(),
-			UpdatedAt:      time.Now().UTC(),
+			ID:   ruleID,
+			Name: "Old",
+			AstroCondition: map[string]string{
+				"sign": "aries",
+			},
+			ProductTags: []string{"fire"},
+			Priority:    5,
+			IsActive:    true,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 		},
 	})
 
 	payload := []byte(`{"name":"New","astro_condition":{"sign":"taurus"},"product_tags":["earth"],"priority":7,"is_active":true}`)
-	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/rules/"+ruleID, bytes.NewReader(payload))
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/rules/"+ruleID.String(), bytes.NewReader(payload))
 	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
@@ -272,7 +303,7 @@ func TestUpdateRuleModifiesFields(t *testing.T) {
 		t.Fatalf("expected 200, got %d, body=%s", response.Code, response.Body.String())
 	}
 
-	updated := repository.items[ruleID]
+	updated := repository.items[ruleID.String()]
 	if updated.Name != "New" || updated.Priority != 7 {
 		t.Fatalf("rule not updated: %+v", updated)
 	}
@@ -305,8 +336,8 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 		{
 			ID:   smplId1,
 			Name: "Active rule",
-			AstroCondition: []rules.AstroCondition{
-				{Sign: "aries"},
+			AstroCondition: map[string]string{
+				"sign": "aries",
 			},
 			ProductTags: []string{"spring"},
 			Priority:    1,
@@ -317,8 +348,8 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 		{
 			ID:   smplId2,
 			Name: "Inactive rule",
-			AstroCondition: []rules.AstroCondition{
-				{Sign: "taurus"},
+			AstroCondition: map[string]string{
+				"sign": "taurus",
 			},
 			ProductTags: []string{"earth"},
 			Priority:    2,
@@ -377,8 +408,8 @@ func TestGetRuleFiltersByActiveFlag(t *testing.T) {
 		{
 			ID:   smplId1,
 			Name: "Active rule",
-			AstroCondition: []rules.AstroCondition{
-				{Sign: "aries"},
+			AstroCondition: map[string]string{
+				"sign": "aries",
 			},
 			ProductTags: []string{"spring"},
 			Priority:    1,

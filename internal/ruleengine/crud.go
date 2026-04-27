@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -79,8 +78,8 @@ func (r *PostgresRepository) Get(ctx context.Context, id string) (*Rule, error) 
 		WHERE id = $1`
 
 	var rule Rule
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	// ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// defer cancel()
 
 	ID, err := uuid.Parse(id)
 	if err != nil {
@@ -172,7 +171,7 @@ func (r *PostgresRepository) Update(ctx context.Context, id string, input *RuleI
 }
 
 // Delete - метод удаляет определнную запись в БД.
-func (r *PostgresRepository) Delete(id string) error {
+func (r *PostgresRepository) Delete(ctx context.Context, id string) error {
 	if !Matches(id, uuidRegex) {
 		return ErrRuleNotFound
 	}
@@ -190,8 +189,8 @@ func (r *PostgresRepository) Delete(id string) error {
 		DELETE FROM astro_rules
 		WHERE id = $1`
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	// ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// defer cancel()
 
 	result, err := r.db.ExecContext(ctx, query, ID)
 	if err != nil {
@@ -340,7 +339,7 @@ func scanRule(scanner rowScanner) (Rule, error) {
 
 	// ?
 	if len(ruleItem.AstroCondition) == 0 {
-		ruleItem.AstroCondition = []AstroCondition{}
+		ruleItem.AstroCondition = map[string]string{}
 	}
 
 	if err := json.Unmarshal(tagsJSON, &ruleItem.ProductTags); err != nil {

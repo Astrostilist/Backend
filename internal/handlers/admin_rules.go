@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -15,13 +14,10 @@ import (
 )
 
 const (
-	defaultRulesLimit = 50
-	maxRulesLimit     = 200
-	dfltPriority      = 99
+	defaultRulesLimit   = 50
+	maxRulesLimit       = 200
+	defaultRulePriority = 99
 )
-
-var planets = []string{"sun", "moon", "mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto"}
-var signs = []string{"aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"}
 
 type AdminRulesHandler struct {
 	repository rules.Repository
@@ -222,26 +218,12 @@ func (r adminRuleRequest) toRuleInput() (rules.RuleInput, error) {
 		return rules.RuleInput{}, errors.New("astro_condition is required")
 	}
 
-	var conditions []rules.AstroCondition
-	for p, s := range r.AstroCondition {
-		if !slices.Contains(planets, strings.ToLower(p)) {
-			return rules.RuleInput{}, errors.New("astro condition has invalid value of planet")
-		}
-		if !slices.Contains(signs, strings.ToLower(s)) {
-			return rules.RuleInput{}, errors.New("astro condition has invalid value of sign")
-		}
-		var tmpCndt rules.AstroCondition
-		tmpCndt.Planet = strings.ToLower(p)
-		tmpCndt.Sign = strings.ToLower(s)
-		conditions = append(conditions, tmpCndt)
-	}
-
-	priority := dfltPriority
+	priority := defaultRulePriority
 	if r.Priority != nil {
 		priority = *r.Priority
 	}
-	if (priority < 0) && (priority > 100) {
-		return rules.RuleInput{}, errors.New("priority must be greater than or equal to 0 and less than 100")
+	if priority < 0 {
+		return rules.RuleInput{}, errors.New("priority must be greater than or equal to 0")
 	}
 
 	productTags := r.ProductTags
@@ -256,7 +238,7 @@ func (r adminRuleRequest) toRuleInput() (rules.RuleInput, error) {
 
 	return rules.RuleInput{
 		Name:           name,
-		AstroCondition: conditions,
+		AstroCondition: r.AstroCondition,
 		ProductTags:    productTags,
 		Priority:       priority,
 		IsActive:       isActive,

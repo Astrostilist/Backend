@@ -1,9 +1,12 @@
+//go:build integration
+
 package ruleengine
 
 import (
 	"context"
 	"database/sql"
 	"log"
+	"maps"
 	"slices"
 	"testing"
 
@@ -29,8 +32,9 @@ func TestCreate(t *testing.T) {
 			name: "positive - create & delete a rule",
 			input: RuleInput{
 				Name: "Меркурий в Стрельце",
-				AstroCondition: []AstroCondition{
-					{Planet: "Sun", Sign: "Aries"},
+				AstroCondition: map[string]string{
+					"sun":  "sunrise",
+					"sign": "aries",
 				},
 				ProductTags: []string{"romantic", "premium"},
 				Priority:    5,
@@ -42,9 +46,10 @@ func TestCreate(t *testing.T) {
 			name: "positive -  create & delete a rule",
 			input: RuleInput{
 				Name: "Меркурий в Стрельце",
-				AstroCondition: []AstroCondition{
-					{Planet: "Sun", Sign: "Aries"},
-					{Planet: "moon", Sign: "gemini"},
+				AstroCondition: map[string]string{
+					"sun":  "sunrise",
+					"sign": "Aries",
+					"moon": "full",
 				},
 				ProductTags: []string{"romantic", "premium"},
 				Priority:    2,
@@ -106,14 +111,14 @@ func TestCreate(t *testing.T) {
 			assert.Equal(t, tt.input.Name, dbRule.Name)
 			assert.Equal(t, tt.input.IsActive, dbRule.IsActive)
 			assert.Equal(t, tt.input.Priority, dbRule.Priority)
-			if !slices.Equal(tt.input.AstroCondition, dbRule.AstroCondition) {
-				t.Errorf("slices AstroCondition are not equal: \n\tWanted: %v . But get: %v", tt.input.AstroCondition, dbRule.AstroCondition)
+			if !maps.Equal(tt.input.AstroCondition, dbRule.AstroCondition) {
+				t.Errorf("maps AstroCondition are not equal: \n\tWanted: %v . But get: %v", tt.input.AstroCondition, dbRule.AstroCondition)
 			}
 			if !slices.Equal(tt.input.ProductTags, dbRule.ProductTags) {
 				t.Errorf("slices ProductTags are not equal: \n\tWanted: %v . But get: %v", tt.input.ProductTags, dbRule.ProductTags)
 			}
 
-			err = rules.Delete(createdID.String())
+			err = rules.Delete(ctx, createdID.String())
 			require.NoError(t, err)
 		})
 	}
@@ -134,8 +139,9 @@ func TestUpdate(t *testing.T) {
 			name: "positive - create & update a rule",
 			input: RuleInput{
 				Name: "Меркурий в Стрельце",
-				AstroCondition: []AstroCondition{
-					{Planet: "Sun", Sign: "Aries"},
+				AstroCondition: map[string]string{
+					"sun":  "sunrise",
+					"sign": "aries",
 				},
 				ProductTags: []string{"romantic", "premium"},
 				Priority:    5,
@@ -143,8 +149,9 @@ func TestUpdate(t *testing.T) {
 			},
 			wantUpdate: RuleInput{
 				Name: "Меркурий в Стрельце",
-				AstroCondition: []AstroCondition{
-					{Planet: "Sun", Sign: "Aries"},
+				AstroCondition: map[string]string{
+					"sun":  "sunrise",
+					"sign": "aries",
 				},
 				ProductTags: []string{"luxery"},
 				Priority:    15,
@@ -155,9 +162,10 @@ func TestUpdate(t *testing.T) {
 			name: "positive -  create & update name a rule",
 			input: RuleInput{
 				Name: "Меркурий в Стрельце",
-				AstroCondition: []AstroCondition{
-					{Planet: "Sun", Sign: "Aries"},
-					{Planet: "moon", Sign: "gemini"},
+				AstroCondition: map[string]string{
+					"sun":  "sunrise",
+					"sign": "aries",
+					"moon": "full",
 				},
 				ProductTags: []string{"romantic", "premium"},
 				Priority:    2,
@@ -165,8 +173,9 @@ func TestUpdate(t *testing.T) {
 			},
 			wantUpdate: RuleInput{
 				Name: "Марс в Близницах",
-				AstroCondition: []AstroCondition{
-					{Planet: "mars", Sign: "gemini"},
+				AstroCondition: map[string]string{
+					"mars": "test",
+					"sign": "gemini",
 				},
 				ProductTags: []string{"luxery"},
 				Priority:    15,
@@ -230,14 +239,14 @@ func TestUpdate(t *testing.T) {
 			assert.Equal(t, tt.wantUpdate.Name, dbRule.Name)
 			assert.Equal(t, tt.wantUpdate.IsActive, dbRule.IsActive)
 			assert.Equal(t, tt.wantUpdate.Priority, dbRule.Priority)
-			if !slices.Equal(tt.wantUpdate.AstroCondition, dbRule.AstroCondition) {
-				t.Errorf("slices AstroCondition are not equal: \n\tWanted: %v . But get: %v", tt.input.AstroCondition, dbRule.AstroCondition)
+			if !maps.Equal(tt.wantUpdate.AstroCondition, dbRule.AstroCondition) {
+				t.Errorf("maps AstroCondition are not equal: \n\tWanted: %v . But get: %v", tt.input.AstroCondition, dbRule.AstroCondition)
 			}
 			if !slices.Equal(tt.wantUpdate.ProductTags, dbRule.ProductTags) {
 				t.Errorf("slices ProductTags are not equal: \n\tWanted: %v . But get: %v", tt.input.ProductTags, dbRule.ProductTags)
 			}
 
-			err = rules.Delete(createdID.String())
+			err = rules.Delete(ctx, createdID.String())
 			require.NoError(t, err)
 
 		})
@@ -262,8 +271,9 @@ func TestList(t *testing.T) {
 			input: []RuleInput{
 				{
 					Name: "а Меркурий в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "Sun", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"sun":  "sumrise",
+						"sign": "Aries",
 					},
 					ProductTags: []string{"romantic", "premium"},
 					Priority:    1,
@@ -271,8 +281,9 @@ func TestList(t *testing.T) {
 				},
 				{
 					Name: "б Венера в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "venus", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"venus": "test",
+						"sign":  "aries",
 					},
 					ProductTags: []string{"premium"},
 					Priority:    3,
@@ -280,8 +291,9 @@ func TestList(t *testing.T) {
 				},
 				{
 					Name: "в Юпитер в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "jupiter", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"jupiter": "test",
+						"sign":    "aries",
 					},
 					ProductTags: []string{"premium"},
 					Priority:    3,
@@ -289,8 +301,9 @@ func TestList(t *testing.T) {
 				},
 				{
 					Name: "г Юпитер в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "saturn", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"saturn": "test",
+						"sign":   "aries",
 					},
 					ProductTags: []string{"agree"},
 					Priority:    5,
@@ -298,8 +311,9 @@ func TestList(t *testing.T) {
 				},
 				{
 					Name: "д Уран в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "uranus", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"uranus": "test",
+						"sign":   "aries",
 					},
 					ProductTags: []string{"agree"},
 					Priority:    6,
@@ -307,8 +321,9 @@ func TestList(t *testing.T) {
 				},
 				{
 					Name: "е Нептун в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "neptune", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"neptune": "test",
+						"sign":    "aries",
 					},
 					ProductTags: []string{"agree"},
 					Priority:    7,
@@ -316,8 +331,9 @@ func TestList(t *testing.T) {
 				},
 				{
 					Name: "ж Плутон в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "pluto", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"pluto": "test",
+						"sign":  "aries",
 					},
 					ProductTags: []string{"agree"},
 					Priority:    10,
@@ -325,8 +341,9 @@ func TestList(t *testing.T) {
 				},
 				{
 					Name: "з Солнце в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "sun", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"sun":  "test",
+						"sign": "aries",
 					},
 					ProductTags: []string{"agree"},
 					Priority:    10,
@@ -341,8 +358,9 @@ func TestList(t *testing.T) {
 			wantList: []RuleInput{
 				{
 					Name: "в Юпитер в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "jupiter", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"jupiter": "test",
+						"sign":    "aries",
 					},
 					ProductTags: []string{"premium"},
 					Priority:    3,
@@ -350,8 +368,9 @@ func TestList(t *testing.T) {
 				},
 				{
 					Name: "г Юпитер в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "saturn", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"saturn": "test",
+						"sign":   "aries",
 					},
 					ProductTags: []string{"agree"},
 					Priority:    5,
@@ -421,8 +440,8 @@ func TestList(t *testing.T) {
 				assert.Equal(t, tt.wantList[k].Name, item.Name)
 				assert.Equal(t, tt.wantList[k].IsActive, item.IsActive)
 				assert.Equal(t, tt.wantList[k].Priority, item.Priority)
-				if !slices.Equal(tt.wantList[k].AstroCondition, item.AstroCondition) {
-					t.Errorf("slices AstroCondition are not equal: \n\tWanted: %v . But get: %v", tt.wantList[k].AstroCondition, item.AstroCondition)
+				if !maps.Equal(tt.wantList[k].AstroCondition, item.AstroCondition) {
+					t.Errorf("maps AstroCondition are not equal: \n\tWanted: %v . But get: %v", tt.wantList[k].AstroCondition, item.AstroCondition)
 				}
 				if !slices.Equal(tt.wantList[k].ProductTags, item.ProductTags) {
 					t.Errorf("slices ProductTags are not equal: \n\tWanted: %v . But get: %v", tt.wantList[k].ProductTags, item.ProductTags)
@@ -450,8 +469,9 @@ func TestDeactivate(t *testing.T) {
 			name: "positive - deactivate a rule",
 			input: RuleInput{
 				Name: "Меркурий в Стрельце",
-				AstroCondition: []AstroCondition{
-					{Planet: "Sun", Sign: "Aries"},
+				AstroCondition: map[string]string{
+					"sun":  "test",
+					"sign": "aries",
 				},
 				ProductTags: []string{"romantic", "premium"},
 				Priority:    5,
@@ -459,8 +479,9 @@ func TestDeactivate(t *testing.T) {
 			},
 			wantUpdate: RuleInput{
 				Name: "Меркурий в Стрельце",
-				AstroCondition: []AstroCondition{
-					{Planet: "Sun", Sign: "Aries"},
+				AstroCondition: map[string]string{
+					"sun":  "test",
+					"sign": "aries",
 				},
 				ProductTags: []string{"romantic", "premium"},
 				Priority:    5,
@@ -524,14 +545,14 @@ func TestDeactivate(t *testing.T) {
 			assert.Equal(t, tt.wantUpdate.Name, dbRule.Name)
 			assert.Equal(t, false, dbRule.IsActive)
 			assert.Equal(t, tt.wantUpdate.Priority, dbRule.Priority)
-			if !slices.Equal(tt.wantUpdate.AstroCondition, dbRule.AstroCondition) {
-				t.Errorf("slices AstroCondition are not equal: \n\tWanted: %v . But get: %v", tt.input.AstroCondition, dbRule.AstroCondition)
+			if !maps.Equal(tt.wantUpdate.AstroCondition, dbRule.AstroCondition) {
+				t.Errorf("maps AstroCondition are not equal: \n\tWanted: %v . But get: %v", tt.input.AstroCondition, dbRule.AstroCondition)
 			}
 			if !slices.Equal(tt.wantUpdate.ProductTags, dbRule.ProductTags) {
 				t.Errorf("slices ProductTags are not equal: \n\tWanted: %v . But get: %v", tt.input.ProductTags, dbRule.ProductTags)
 			}
 
-			err = rules.Delete(createdID.String())
+			err = rules.Delete(ctx, createdID.String())
 			require.NoError(t, err)
 
 		})
@@ -554,8 +575,9 @@ func TestDelete(t *testing.T) {
 			name: "positive - create & delete a rule",
 			input: RuleInput{
 				Name: "Меркурий в Стрельце",
-				AstroCondition: []AstroCondition{
-					{Planet: "Sun", Sign: "Aries"},
+				AstroCondition: map[string]string{
+					"sun":  "test",
+					"sign": "aries",
 				},
 				ProductTags: []string{"romantic", "premium"},
 				Priority:    5,
@@ -617,17 +639,17 @@ func TestDelete(t *testing.T) {
 			assert.Equal(t, tt.input.Name, dbRule.Name)
 			assert.Equal(t, tt.input.IsActive, dbRule.IsActive)
 			assert.Equal(t, tt.input.Priority, dbRule.Priority)
-			if !slices.Equal(tt.input.AstroCondition, dbRule.AstroCondition) {
-				t.Errorf("slices AstroCondition are not equal: \n\tWanted: %v . But get: %v", tt.input.AstroCondition, dbRule.AstroCondition)
+			if !maps.Equal(tt.input.AstroCondition, dbRule.AstroCondition) {
+				t.Errorf("maps AstroCondition are not equal: \n\tWanted: %v . But get: %v", tt.input.AstroCondition, dbRule.AstroCondition)
 			}
 			if !slices.Equal(tt.input.ProductTags, dbRule.ProductTags) {
 				t.Errorf("slices ProductTags are not equal: \n\tWanted: %v . But get: %v", tt.input.ProductTags, dbRule.ProductTags)
 			}
 
-			err = rules.Delete(createdID.String())
+			err = rules.Delete(ctx, createdID.String())
 			require.NoError(t, err)
 
-			err = rules.Delete(createdID.String())
+			err = rules.Delete(ctx, createdID.String())
 			require.Error(t, err)
 		})
 	}
@@ -646,8 +668,9 @@ func TestCreateAndMatch(t *testing.T) {
 			input: []RuleInput{
 				{
 					Name: "Меркурий в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "Sun", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"sun":  "test",
+						"sign": "aries",
 					},
 					ProductTags: []string{"romantic", "premium"},
 					Priority:    5,
@@ -655,9 +678,9 @@ func TestCreateAndMatch(t *testing.T) {
 				},
 				{
 					Name: "Меркурий в Водолее",
-					AstroCondition: []AstroCondition{
-						{Planet: "Sun", Sign: "Aries"},
-						{Planet: "moon", Sign: "gemini"},
+					AstroCondition: map[string]string{
+						"moon": "test",
+						"sign": "gemini",
 					},
 					ProductTags: []string{"active", "premium"},
 					Priority:    2,
@@ -665,9 +688,9 @@ func TestCreateAndMatch(t *testing.T) {
 				},
 				{
 					Name: "Скорпион в Водолее",
-					AstroCondition: []AstroCondition{
-						{Planet: "Sun", Sign: "Aries"},
-						{Planet: "moon", Sign: "gemini"},
+					AstroCondition: map[string]string{
+						"sun":  "test",
+						"sign": "gemini",
 					},
 					ProductTags: []string{"red"},
 					Priority:    1,
@@ -688,8 +711,9 @@ func TestCreateAndMatch(t *testing.T) {
 			input: []RuleInput{
 				{
 					Name: "Меркурий в Стрельце",
-					AstroCondition: []AstroCondition{
-						{Planet: "Sun", Sign: "Aries"},
+					AstroCondition: map[string]string{
+						"sun":  "test",
+						"sign": "Aries",
 					},
 					ProductTags: []string{"lux"},
 					Priority:    5,
@@ -760,7 +784,7 @@ func TestCreateAndMatch(t *testing.T) {
 
 			if len(list) > 0 {
 				for _, item := range ids {
-					err = rules.Delete(item.String())
+					err = rules.Delete(ctx, item.String())
 					require.NoError(t, err)
 				}
 			}
