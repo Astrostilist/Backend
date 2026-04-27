@@ -55,11 +55,6 @@ func (r *PostgresRepository) Create(ctx context.Context, input *RuleInput) (uuid
 		input.IsActive,
 	).Scan(&id)
 
-	// ruleItem, scanErr := scanRule(row)
-	// if scanErr != nil {
-	// 	return nil, scanErr
-	// }
-
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -73,7 +68,7 @@ func (r *PostgresRepository) Create(ctx context.Context, input *RuleInput) (uuid
 }
 
 // Get - получить конкретную запись из БД.
-func (r *PostgresRepository) Get(id string) (*Rule, error) {
+func (r *PostgresRepository) Get(ctx context.Context, id string) (*Rule, error) {
 	if !Matches(id, uuidRegex) {
 		return nil, ErrRuleNotFound
 	}
@@ -127,14 +122,14 @@ func (r *PostgresRepository) Get(id string) (*Rule, error) {
 }
 
 // Update - метод обновляет конкретную запись в БД.
-func (r *PostgresRepository) Update(ctx context.Context, id string, input *RuleInput) (*Rule, error) {
+func (r *PostgresRepository) Update(ctx context.Context, id string, input *RuleInput) (uuid.UUID, error) {
 	if !Matches(id, uuidRegex) {
-		return nil, ErrRuleNotFound
+		return uuid.Nil, ErrRuleNotFound
 	}
 
 	conditionJSON, tagsJSON, err := marshalRulePayload(*input)
 	if err != nil {
-		return nil, err
+		return uuid.Nil, err
 	}
 	quary := `
 			UPDATE astro_rules
@@ -145,13 +140,14 @@ func (r *PostgresRepository) Update(ctx context.Context, id string, input *RuleI
 			    is_active = $6,
 			    updated_at = CURRENT_TIMESTAMP
 			WHERE id = $1
-			RETURNING id, name, astro_condition, product_tags, priority, is_active, created_at, updated_at
+			RETURNING id
 		`
 	ID, err := uuid.Parse(id)
 	if err != nil {
-		return nil, err
+		return uuid.Nil, err
 	}
-	row := r.db.QueryRowContext(
+	var dbID string
+	err = r.db.QueryRowContext(
 		ctx,
 		quary,
 		ID,
@@ -160,14 +156,19 @@ func (r *PostgresRepository) Update(ctx context.Context, id string, input *RuleI
 		tagsJSON,
 		input.Priority,
 		input.IsActive,
-	)
+	).Scan(&dbID)
 
-	ruleItem, scanErr := scanRule(row)
-	if scanErr != nil {
-		return nil, scanErr
+	if err != nil {
+		return uuid.Nil, err
 	}
 
-	return &ruleItem, nil
+	parsedUUID, err := uuid.Parse(dbID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	return parsedUUID, nil
+
 }
 
 // Delete - метод удаляет определнную запись в БД.
@@ -211,7 +212,7 @@ func (r *PostgresRepository) Delete(id string) error {
 }
 
 // List -  получить список правил. GET /api/v1/admin/rules?page=1&page_size=5
-func (r *PostgresRepository) List(ctx context.Context, options ListOptions) ([]Rule, Metadata, error) {
+func (r *PostgresRepository) List(ctx context.Context, options ListOptions) ([]*Rule, Metadata, error) {
 	query := fmt.Sprintf(`
 	SELECT COUNT(*) OVER(), id, name, astro_condition, product_tags, priority, is_active, created_at, updated_at
 	FROM  astro_rules
@@ -228,7 +229,7 @@ func (r *PostgresRepository) List(ctx context.Context, options ListOptions) ([]R
 
 	totalRecords := 0
 
-	rules := []Rule{}
+	rules := []*Rule{}
 
 	for rows.Next() {
 		var rule Rule
@@ -258,7 +259,7 @@ func (r *PostgresRepository) List(ctx context.Context, options ListOptions) ([]R
 			return nil, Metadata{}, err
 		}
 
-		rules = append(rules, rule)
+		rules = append(rules, &rule)
 	}
 
 	if err = rows.Err(); err != nil {

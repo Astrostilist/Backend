@@ -46,8 +46,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminRulesListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerErr"
+
     post:
       summary: Create an astro rule
       security:
@@ -68,12 +73,20 @@ paths:
                 properties:
                   message:
                     type: string
-                  id:
-                    type: string
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalServerErr"
+
   /api/v1/admin/rules/{id}:
     get:
       summary: Single rule
@@ -93,8 +106,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminRulesSingleEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerErr"
 
     put:
       summary: Update an astro rule
@@ -125,12 +142,17 @@ paths:
                     type: string
                   id:
                     type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalServerErr"
+
     delete:
       summary: Soft delete an astro rule by deactivating it
       security:
@@ -152,11 +174,15 @@ paths:
                 properties:
                   message:
                     type: string
-
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerErr"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -168,19 +194,56 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Envelope"
+            type: object
+            properties:
+              message:
+                type: string
+              error:
+                type: string
+    InternalServerErr:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              error:
+                type: string
     NotFound:
       description: Resource not found
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Envelope"
+            type: object
+            properties:
+              message:
+                type: string
+              error:
+                type: string
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              error:
+                type: string
     ValidationError:
       description: Request validation failed
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Envelope"
+            type: object
+            properties:
+              message:
+                type: string
+              error:
+                type: string
   schemas:
     Envelope:
       type: object
@@ -273,7 +336,7 @@ components:
             data:
               type: object
               properties:
-                items:
+                rules:
                   type: array
                   items:
                     $ref: "#/components/schemas/AdminRule"
@@ -298,11 +361,5 @@ components:
             data:
               type: object
               properties:
-                items:
+                rule:
                   $ref: "#/components/schemas/AdminRule"
-                limit:
-                  type: integer
-                offset:
-                  type: integer
-                total_count:
-                  type: integer

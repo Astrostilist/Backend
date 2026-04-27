@@ -36,7 +36,7 @@ type adminRuleRequest struct {
 }
 
 type adminRulesListResponse struct {
-	Items    []rules.Rule `json:"items"`
+	Rules    []rules.Rule `json:"rules"`
 	Metadata struct {
 		CurrentPage  int `json:"current_page,omitzero"`
 		PageSize     int `json:"page_size,omitzero"`
@@ -58,11 +58,13 @@ func RegisterAdminRulesRoutes(router chi.Router, adminToken string, handler *Adm
 		router.Use(AdminAuthMiddleware(adminToken))
 		router.Get("/", handler.ListRules)
 		router.Post("/", handler.CreateRule)
+		router.Get("/{id}", handler.GetRule)
 		router.Put("/{id}", handler.UpdateRule)
 		router.Delete("/{id}", handler.DeleteRule)
 	})
 }
 
+// ListRules - обрабатывает  get, выдает список правил.
 func (h *AdminRulesHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 	listOptions, err := parseRulesListOptions(r)
 	if err != nil {
@@ -78,13 +80,11 @@ func (h *AdminRulesHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Astro rules fetched successfully",
-		Data: adminRulesListResponse{
-			Items:    result,
-			Metadata: metadata,
-		},
+		Data:    map[string]any{"rules": result, "metadata": metadata},
 	})
 }
 
+// CreateRule - обрабатывает POST, создает правило в БД.
 func (h *AdminRulesHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 	payload, err := decodeAdminRuleRequest(r)
 	if err != nil {
@@ -98,15 +98,35 @@ func (h *AdminRulesHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	createdRule, err := h.repository.Create(r.Context(), &input)
+	idCreatedRule, err := h.repository.Create(r.Context(), &input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create astro rule")
 		return
 	}
+	result := map[string]any{"id": idCreatedRule.String()}
 
 	writeJSON(w, http.StatusCreated, Response{
 		Message: "Astro rule created successfully",
-		Data:    createdRule,
+		Data:    result,
+	})
+}
+
+func (h *AdminRulesHandler) GetRule(w http.ResponseWriter, r *http.Request) {
+	ruleID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if ruleID == "" {
+		writeError(w, http.StatusBadRequest, "rule id is required")
+		return
+	}
+
+	rule, err := h.repository.Get(r.Context(), ruleID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch astro rules")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, Response{
+		Message: "Astro rules fetched successfully",
+		Data:    map[string]any{"rule": rule},
 	})
 }
 
@@ -243,23 +263,24 @@ func (r adminRuleRequest) toRuleInput() (rules.RuleInput, error) {
 	}, nil
 }
 
+// parseRulesListOptions - парсинг параметров запроса.
 func parseRulesListOptions(r *http.Request) (rules.ListOptions, error) {
 	query := r.URL.Query()
 
 	limit := defaultRulesLimit
-	if rawLimit := strings.TrimSpace(query.Get("limit")); rawLimit != "" {
+	if rawLimit := strings.TrimSpace(query.Get("page_size")); rawLimit != "" {
 		parsedLimit, err := strconv.Atoi(rawLimit)
 		if err != nil || parsedLimit < 1 || parsedLimit > maxRulesLimit {
-			return rules.ListOptions{}, errors.New("limit must be an integer between 1 and 200")
+			return rules.ListOptions{}, errors.New("page_size (limit) must be an integer between 1 and 200")
 		}
 		limit = parsedLimit
 	}
 
 	offset := 0
-	if rawOffset := strings.TrimSpace(query.Get("offset")); rawOffset != "" {
+	if rawOffset := strings.TrimSpace(query.Get("page")); rawOffset != "" {
 		parsedOffset, err := strconv.Atoi(rawOffset)
 		if err != nil || parsedOffset < 0 {
-			return rules.ListOptions{}, errors.New("offset must be an integer greater than or equal to 0")
+			return rules.ListOptions{}, errors.New("page (offset) must be an integer greater than or equal to 0")
 		}
 		offset = parsedOffset
 	}

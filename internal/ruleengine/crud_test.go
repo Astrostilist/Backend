@@ -100,7 +100,7 @@ func TestCreate(t *testing.T) {
 				t.Error(t, "uuid is nil")
 			}
 
-			dbRule, err := rules.Get(createdID.String())
+			dbRule, err := rules.Get(ctx, createdID.String())
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.input.Name, dbRule.Name)
@@ -224,7 +224,7 @@ func TestUpdate(t *testing.T) {
 			_, err = rules.Update(ctx, createdID.String(), &tt.wantUpdate)
 			require.NoError(t, err)
 
-			dbRule, err := rules.Get(createdID.String())
+			dbRule, err := rules.Get(ctx, createdID.String())
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.wantUpdate.Name, dbRule.Name)
@@ -518,7 +518,7 @@ func TestDeactivate(t *testing.T) {
 			_, err = rules.Deactivate(ctx, createdID.String())
 			require.NoError(t, err)
 
-			dbRule, err := rules.Get(createdID.String())
+			dbRule, err := rules.Get(ctx, createdID.String())
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.wantUpdate.Name, dbRule.Name)
@@ -611,7 +611,7 @@ func TestDelete(t *testing.T) {
 				t.Error(t, "uuid is nil")
 			}
 
-			dbRule, err := rules.Get(createdID.String())
+			dbRule, err := rules.Get(ctx, createdID.String())
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.input.Name, dbRule.Name)
@@ -632,4 +632,139 @@ func TestDelete(t *testing.T) {
 		})
 	}
 
+}
+
+func TestCreateAndMatch(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         []RuleInput
+		inputTriggers []string
+		want          []string
+	}{
+		{
+			name: "positive - create & match && delete a rule",
+			input: []RuleInput{
+				{
+					Name: "Меркурий в Стрельце",
+					AstroCondition: []AstroCondition{
+						{Planet: "Sun", Sign: "Aries"},
+					},
+					ProductTags: []string{"romantic", "premium"},
+					Priority:    5,
+					IsActive:    true,
+				},
+				{
+					Name: "Меркурий в Водолее",
+					AstroCondition: []AstroCondition{
+						{Planet: "Sun", Sign: "Aries"},
+						{Planet: "moon", Sign: "gemini"},
+					},
+					ProductTags: []string{"active", "premium"},
+					Priority:    2,
+					IsActive:    true,
+				},
+				{
+					Name: "Скорпион в Водолее",
+					AstroCondition: []AstroCondition{
+						{Planet: "Sun", Sign: "Aries"},
+						{Planet: "moon", Sign: "gemini"},
+					},
+					ProductTags: []string{"red"},
+					Priority:    1,
+					IsActive:    true,
+				},
+			},
+			inputTriggers: []string{"Меркурий в Стрельце", "Меркурий в Водолее", "Скорпион в Водолее"},
+			want:          []string{"red", "active", "premium", "romantic"},
+		},
+		{
+			name:          "positive - triggers not exist",
+			input:         []RuleInput{},
+			inputTriggers: []string{"Меркурий в Стрельце"},
+			want:          []string{},
+		},
+		{
+			name: "positive - create & match && delete a rule",
+			input: []RuleInput{
+				{
+					Name: "Меркурий в Стрельце",
+					AstroCondition: []AstroCondition{
+						{Planet: "Sun", Sign: "Aries"},
+					},
+					ProductTags: []string{"lux"},
+					Priority:    5,
+					IsActive:    true,
+				},
+			},
+			inputTriggers: []string{"Меркурий в Стрельце", "Меркурий в Стрельце"},
+			want:          []string{"lux"},
+		},
+	}
+
+	ctx := context.Background()
+
+	dbName := "crud_test"
+	dbUser := "user"
+	DBPassword := "password"
+
+	ctr, err := postgres.Run(
+		ctx,
+		"postgres:17",
+		postgres.WithDatabase(dbName),
+		postgres.WithUsername(dbUser),
+		postgres.WithPassword(DBPassword),
+		postgres.WithSQLDriver("pq"),
+		postgres.BasicWaitStrategies(),
+	)
+
+	defer func() {
+		if err = ctr.Terminate(ctx); err != nil {
+			log.Printf("failed to clode test Container: %v", err)
+		}
+	}()
+	require.NoError(t, err)
+	dbURL, err := ctr.ConnectionString(ctx, "sslmode=disable")
+	require.NoError(t, err)
+
+	db, err := sql.Open("postgres", dbURL)
+	require.NoError(t, err)
+	defer func() {
+		if err = db.Close(); err != nil {
+			log.Printf("failed ti close db: %v\n", err)
+		}
+	}()
+
+	err = goose.Up(db, "../../migrations")
+	require.NoError(t, err)
+
+	rules := PostgresRepository{db}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ids []uuid.UUID
+			for _, item := range tt.input {
+				createdID, err := rules.Create(ctx, &item)
+				require.NoError(t, err)
+
+				if createdID == uuid.Nil {
+					t.Error(t, "uuid is nil")
+				}
+				ids = append(ids, createdID)
+
+			}
+			list, err := rules.Match(ctx, tt.inputTriggers)
+			assert.NilError(t, err)
+
+			if !slices.Equal(tt.want, list) {
+				t.Errorf("slices  are not equal: \n\tWanted: %v . But get: %v", tt.want, list)
+			}
+
+			if len(list) > 0 {
+				for _, item := range ids {
+					err = rules.Delete(item.String())
+					require.NoError(t, err)
+				}
+			}
+
+		})
+	}
 }

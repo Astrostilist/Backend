@@ -30,7 +30,7 @@ func newFakeRulesRepository(items []rules.Rule) *fakeRulesRepository {
 	}
 	return repository
 }
-func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions) ([]rules.Rule, rules.Metadata, error) {
+func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions) ([]*rules.Rule, rules.Metadata, error) {
 	filtered := make([]rules.Rule, 0, len(r.items))
 	for _, item := range r.items {
 		if options.IsActive != nil && item.IsActive != *options.IsActive {
@@ -56,7 +56,16 @@ func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions)
 		LastPage:     end,
 		TotalRecords: len(filtered),
 	}
-	return filtered[start:end], mtdata, nil
+
+	var subFiltered []*rules.Rule
+	subFiltered = make([]*rules.Rule, 0)
+	for i := start; i < end; i++ {
+		subFiltered = append(subFiltered, &filtered[i])
+	}
+	// subFiltered := filtered[start:end]
+	// myPointer := &subFiltered
+
+	return subFiltered, mtdata, nil
 }
 func (r *fakeRulesRepository) Create(_ context.Context, input *rules.RuleInput) (uuid.UUID, error) {
 	now := time.Now().UTC()
@@ -78,10 +87,10 @@ func (r *fakeRulesRepository) Create(_ context.Context, input *rules.RuleInput) 
 	return smplID, nil
 }
 
-func (r *fakeRulesRepository) Update(_ context.Context, id string, input *rules.RuleInput) (*rules.Rule, error) {
+func (r *fakeRulesRepository) Update(_ context.Context, id string, input *rules.RuleInput) (uuid.UUID, error) {
 	currentRule, ok := r.items[id]
 	if !ok {
-		return nil, rules.ErrRuleNotFound
+		return uuid.Nil, rules.ErrRuleNotFound
 	}
 
 	currentRule.Name = input.Name
@@ -91,11 +100,15 @@ func (r *fakeRulesRepository) Update(_ context.Context, id string, input *rules.
 	currentRule.IsActive = input.IsActive
 	currentRule.UpdatedAt = time.Now().UTC()
 	r.items[id] = currentRule
+	parsedUUID, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
 
-	return &currentRule, nil
+	return parsedUUID, nil
 }
 
-func (r *fakeRulesRepository) Get(id string) (*rules.Rule, error) {
+func (r *fakeRulesRepository) Get(_ context.Context, id string) (*rules.Rule, error) {
 	currentRule, ok := r.items[id]
 	if !ok {
 		return nil, rules.ErrRuleNotFound
@@ -264,7 +277,7 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 		t.Fatal("expected response data to be a map")
 	}
 
-	items, ok := payload["items"].([]any)
+	items, ok := payload["rules"].([]any)
 	if !ok {
 		t.Fatal("expected response data.items to be a list")
 	}
@@ -281,4 +294,56 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 	if item["is_active"] != true {
 		t.Fatal("expected filtered item to be active")
 	}
+}
+
+func TestGetRuleFiltersByActiveFlag(t *testing.T) {
+	t.Parallel()
+	smplId1, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
+	require.NoError(t, err)
+
+	repository := newFakeRulesRepository([]rules.Rule{
+		{
+			ID:   smplId1,
+			Name: "Active rule",
+			AstroCondition: []rules.AstroCondition{
+				{Sign: "aries"},
+			},
+			ProductTags: []string{"spring"},
+			Priority:    1,
+			IsActive:    true,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		},
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules/"+smplId1.String(), nil)
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	response := httptest.NewRecorder()
+
+	mux := newAdminRulesTestMux(repository)
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
+	}
+
+	var envelope Response
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	payload, ok := envelope.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected response data to be a map")
+	}
+
+	item, ok := payload["rule"].(map[string]any)
+	if !ok {
+		t.Fatal("expected first rule item to be an object")
+	}
+
+	if item["is_active"] != true {
+		t.Fatal("expected filtered item to be active")
+	}
+
 }
