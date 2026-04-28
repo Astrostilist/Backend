@@ -164,8 +164,7 @@ func run() error {
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
-	r.Post("/api/v1/admin/catalog/import", handlers.ImportCatalogHandler)
-
+	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 
 	r.Group(func(r chi.Router) {
