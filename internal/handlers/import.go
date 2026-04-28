@@ -25,7 +25,11 @@ func NewImportHandler(db *database.PostgresDB) http.HandlerFunc {
             http.Error(w, "Missing file field", http.StatusBadRequest)
             return
         }
-        defer file.Close()
+        defer func() {
+            if cerr := file.Close(); cerr != nil {
+                http.Error(w, "Failed to close file", http.StatusInternalServerError)
+            }
+        }()
 
         result, err := importer.RunImport(r.Context(), db.DB, file)
         if err != nil {
@@ -34,6 +38,9 @@ func NewImportHandler(db *database.PostgresDB) http.HandlerFunc {
         }
 
         w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(result)
+        if err := json.NewEncoder(w).Encode(result); err != nil {
+            http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+            return
+        }
     }
 }

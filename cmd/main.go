@@ -213,14 +213,14 @@ func run() error {
 	return nil
 }
 
-func runMigrations(db *database.PostgresDB, logger *zap.Logger) {
+func runMigrations(db *database.PostgresDB, zapLogger *zap.Logger) {
     if err := goose.SetDialect("postgres"); err != nil {
         log.Fatal("Failed to set goose dialect:", err)
     }
     if err := goose.Up(db.DB, "./migrations"); err != nil {
         log.Fatal("Failed to apply migrations:", err)
     }
-    logger.Info("Migrations applied")
+    zapLogger.Info("Migrations applied")
 }
 
 func decodeEncryptionKey(encoded string) ([]byte, error) {
