@@ -3,16 +3,65 @@ version: "2"
 linters:
   enable:
     - errcheck
+    - errorlint
     - govet
+    - ineffassign
     - staticcheck
     - unused
     - gosec
+    - gocritic
+    - revive
+    - misspell
+    - bodyclose
+    - noctx
+    - prealloc
+    - unconvert
+    - nilerr
 
   settings:
     gosec:
       excludes:
+        # G101 false positives на константах/шаблонах .env; G104 - ошибки игнорируются в некоторых дефёрах (закрытие соединений и т.п.)
         - G101
         - G104
+    revive:
+      rules:
+        - name: var-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: unreachable-code
+    gocritic:
+      enabled-tags:
+        - performance
+        - style
+        - diagnostic
+      disabled-checks:
+        - commentFormatting
+        - ifElseChain
+        - unnamedResult
+        - paramTypeCombine
+        - captLocal
+        - hugeParam
+        - rangeValCopy
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - prealloc
+          - noctx
+          - bodyclose
+          - gocritic
+      - path: mocks/
+        linters:
+          - unused
+          - errcheck
+          - gosec
+          - revive
+          - gocritic
 
 run:
   timeout: 5m
+  tests: true
