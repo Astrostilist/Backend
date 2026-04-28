@@ -185,11 +185,11 @@ func TestCreateRuleRejectsNegativePriority(t *testing.T) {
 func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
 	t.Parallel()
 
-	smplId, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
+	smplID, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
 	require.NoError(t, err)
 	repository := newFakeRulesRepository([]rules.Rule{
 		{
-			ID:   smplId,
+			ID:   smplID,
 			Name: "Seasonal rule",
 			AstroCondition: map[string]string{
 				"sign": "aries",
@@ -202,7 +202,7 @@ func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
 		},
 	})
 
-	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/rules/"+smplId.String(), nil)
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/rules/"+smplID.String(), nil)
 	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
@@ -213,7 +213,7 @@ func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
 	}
 
-	storedRule, exists := repository.items[smplId.String()]
+	storedRule, exists := repository.items[smplID.String()]
 	if !exists {
 		t.Fatal("expected soft-deleted rule to stay in repository")
 	}
@@ -327,14 +327,14 @@ func TestUpdateRuleNotFound(t *testing.T) {
 
 func TestListRulesFiltersByActiveFlag(t *testing.T) {
 	t.Parallel()
-	smplId1, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
+	smplID1, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
 	require.NoError(t, err)
-	smplId2, err := uuid.Parse("22222222-2222-2222-2222-222222222222")
+	smplID2, err := uuid.Parse("22222222-2222-2222-2222-222222222222")
 	require.NoError(t, err)
 
 	repository := newFakeRulesRepository([]rules.Rule{
 		{
-			ID:   smplId1,
+			ID:   smplID1,
 			Name: "Active rule",
 			AstroCondition: map[string]string{
 				"sign": "aries",
@@ -346,7 +346,7 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 			UpdatedAt:   time.Now().UTC(),
 		},
 		{
-			ID:   smplId2,
+			ID:   smplID2,
 			Name: "Inactive rule",
 			AstroCondition: map[string]string{
 				"sign": "taurus",
@@ -401,12 +401,12 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 
 func TestGetRuleFiltersByActiveFlag(t *testing.T) {
 	t.Parallel()
-	smplId1, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
+	smplID1, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
 	require.NoError(t, err)
 
 	repository := newFakeRulesRepository([]rules.Rule{
 		{
-			ID:   smplId1,
+			ID:   smplID1,
 			Name: "Active rule",
 			AstroCondition: map[string]string{
 				"sign": "aries",
@@ -419,7 +419,7 @@ func TestGetRuleFiltersByActiveFlag(t *testing.T) {
 		},
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules/"+smplId1.String(), nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules/"+smplID1.String(), nil)
 	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 

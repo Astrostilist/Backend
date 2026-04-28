@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 
 	"github.com/google/uuid"
@@ -78,8 +79,6 @@ func (r *PostgresRepository) Get(ctx context.Context, id string) (*Rule, error) 
 		WHERE id = $1`
 
 	var rule Rule
-	// ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	// defer cancel()
 
 	ID, err := uuid.Parse(id)
 	if err != nil {
@@ -189,9 +188,6 @@ func (r *PostgresRepository) Delete(ctx context.Context, id string) error {
 		DELETE FROM astro_rules
 		WHERE id = $1`
 
-	// ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	// defer cancel()
-
 	result, err := r.db.ExecContext(ctx, query, ID)
 	if err != nil {
 		return err
@@ -212,19 +208,24 @@ func (r *PostgresRepository) Delete(ctx context.Context, id string) error {
 
 // List -  получить список правил. GET /api/v1/admin/rules?page=1&page_size=5
 func (r *PostgresRepository) List(ctx context.Context, options ListOptions) ([]*Rule, Metadata, error) {
-	query := fmt.Sprintf(`
+	query := `
 	SELECT COUNT(*) OVER(), id, name, astro_condition, product_tags, priority, is_active, created_at, updated_at
 	FROM  astro_rules
-	WHERE is_active = %v
+	WHERE is_active = $3
 	ORDER BY name ASC
-	LIMIT $1 OFFSET $2`, *options.IsActive)
+	LIMIT $1 OFFSET $2`
 
-	args := []any{options.limit(), options.offset()}
+	args := []any{options.limit(), options.offset(), *options.IsActive}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, Metadata{}, err
 	}
-	defer rows.Close()
+	defer func() {
+		err = rows.Close()
+		if err != nil {
+			log.Printf("failed to rows close: %v", err)
+		}
+	}()
 
 	totalRecords := 0
 
@@ -261,7 +262,7 @@ func (r *PostgresRepository) List(ctx context.Context, options ListOptions) ([]*
 		rules = append(rules, &rule)
 	}
 
-	if err = rows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, Metadata{}, err
 	}
 
