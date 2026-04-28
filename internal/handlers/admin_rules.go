@@ -31,20 +31,6 @@ type adminRuleRequest struct {
 	IsActive       *bool             `json:"is_active"`
 }
 
-type adminRulesListResponse struct {
-	Rules    []rules.Rule `json:"rules"`
-	Metadata struct {
-		CurrentPage  int `json:"current_page,omitzero"`
-		PageSize     int `json:"page_size,omitzero"`
-		FirstPage    int `json:"first_page,omitzero"`
-		LastPage     int `json:"last_page,omitzero"`
-		TotalRecords int `json:"total_records,omitzero"`
-	} `json:"metadata"`
-	// Limit      int `json:"limit"`
-	// Offset     int `json:"offset"`
-	// TotalCount int `json:"total_count"`
-}
-
 func NewAdminRulesHandler(repository rules.Repository) *AdminRulesHandler {
 	return &AdminRulesHandler{repository: repository}
 }
