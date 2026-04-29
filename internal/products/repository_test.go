@@ -4,6 +4,7 @@ import (
     "context"
     "database/sql"
     "testing"
+    "time"
 
     _ "github.com/lib/pq"
     "github.com/stretchr/testify/assert"
@@ -21,7 +22,8 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
             "POSTGRES_PASSWORD": "test",
             "POSTGRES_DB":       "testdb",
         },
-        WaitingFor: wait.ForLog("database system is ready to accept connections"),
+        WaitingFor: wait.ForLog("database system is ready to accept connections").
+            WithStartupTimeout(60 * time.Second),
     }
     container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
         ContainerRequest: req,
@@ -30,13 +32,31 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
     if err != nil {
         t.Skip("Docker not available, skipping test")
     }
-    host, _ := container.Host(ctx)
-    port, _ := container.MappedPort(ctx, "5432")
+    host, err := container.Host(ctx)
+    if err != nil {
+        t.Fatalf("Cannot get container host: %v", err)
+    }
+    port, err := container.MappedPort(ctx, "5432")
+    if err != nil {
+        t.Fatalf("Cannot get mapped port: %v", err)
+    }
     connStr := "postgres://test:test@" + host + ":" + port.Port() + "/testdb?sslmode=disable"
     db, err := sql.Open("postgres", connStr)
     if err != nil {
-        t.Fatal(err)
+        t.Fatalf("Cannot open db: %v", err)
     }
+    // Проверка соединения с повторными попытками
+    var pingErr error
+    for i := 0; i < 10; i++ {
+        if pingErr = db.Ping(); pingErr == nil {
+            break
+        }
+        time.Sleep(500 * time.Millisecond)
+    }
+    if pingErr != nil {
+        t.Fatalf("Cannot ping db after retries: %v", pingErr)
+    }
+    // Создаём таблицу и индекс
     _, err = db.Exec(`
         CREATE TABLE products (
             sku TEXT PRIMARY KEY,
@@ -50,9 +70,12 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
         CREATE INDEX idx_products_tags ON products USING GIN (tags);
     `)
     if err != nil {
-        t.Fatal(err)
+        t.Fatalf("Cannot create schema: %v", err)
     }
-    return db, func() { db.Close(); container.Terminate(ctx) }
+    return db, func() {
+        db.Close()
+        container.Terminate(ctx)
+    }
 }
 
 func TestFindByTagsOrder(t *testing.T) {
