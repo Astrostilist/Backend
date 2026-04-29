@@ -20,6 +20,7 @@ import (
 	"astroapi/internal/logger"
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
+	"astroapi/internal/products"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
 	"astroapi/internal/user"
@@ -104,6 +105,7 @@ func run() error {
 	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
 	requestsRepo := requests.NewPostgresRepository(db.DB)
 	rulesRepo := rules.NewPostgresRepository(db.DB)
+	productsRepo := products.NewPostgresRepository(db.DB)
 
 	aiClient := alisa.NewClient(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL)
 
@@ -146,6 +148,7 @@ func run() error {
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
+	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
 
 	dlqreader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqreader, zapLogger)
@@ -160,6 +163,7 @@ func run() error {
 	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
+	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
 
 	r.Group(func(r chi.Router) {
 		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))

@@ -143,7 +143,7 @@ func (h *AdminRulesHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Astro rule updated successfully",
-		Data:    updatedRule,
+		Data:    map[string]any{"id": updatedRule.String()},
 	})
 }
 
