@@ -132,9 +132,10 @@ func main() {
 
 	// Регистрируем ВСЕ маршруты
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
+	r.Get("/api/v1/products", handlers.SearchProductsHandler(database.DB))
 	r.Post("/api/v1/astro/profile", handlers.ProfileHandler)
 	r.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
-  r.Post("/api/v1/admin/catalog/import", handlers.ImportCatalogHandler)
+  	r.Post("/api/v1/admin/catalog/import", handlers.ImportCatalogHandler)
 
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 
