@@ -10,6 +10,7 @@ import (
     "astroapi/internal/models"
 )
 
+// FindByTags ищет товары по тегам. limit не может быть больше 100.
 func FindByTags(ctx context.Context, db *sql.DB, tags []string, limit, offset int) ([]models.Product, error) {
     if limit <= 0 {
         limit = 10
@@ -32,7 +33,6 @@ func FindByTags(ctx context.Context, db *sql.DB, tags []string, limit, offset in
     builder.WriteString("}")
     pgArray := builder.String()
 
-
     query := `
         SELECT sku, name, description, price, tags, category, rating,
                (SELECT COUNT(*) FROM jsonb_array_elements_text(tags) AS elem WHERE elem = ANY($1::text[])) AS match_count
@@ -47,8 +47,8 @@ func FindByTags(ctx context.Context, db *sql.DB, tags []string, limit, offset in
         return nil, fmt.Errorf("query failed: %w", err)
     }
     defer func() {
-        if err := rows.Close(); err != nil {
-            _ = err
+        if cerr := rows.Close(); cerr != nil {
+            _ = cerr
         }
     }()
 
@@ -57,7 +57,8 @@ func FindByTags(ctx context.Context, db *sql.DB, tags []string, limit, offset in
         var p models.Product
         var tagsJSON []byte
         var rating sql.NullFloat64
-        if err := rows.Scan(&p.SKU, &p.Name, &p.Description, &p.Price, &tagsJSON, &p.Category, &rating); err != nil {
+        var matchCount int 
+        if err := rows.Scan(&p.SKU, &p.Name, &p.Description, &p.Price, &tagsJSON, &p.Category, &rating, &matchCount); err != nil {
             return nil, err
         }
         if rating.Valid {
