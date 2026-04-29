@@ -8,6 +8,7 @@ import (
     "fmt"
     "io"
     "strconv"
+    "errors"
     "strings"
     "astroapi/internal/models"
 )
@@ -29,7 +30,7 @@ func RunImport(ctx context.Context, db *sql.DB, r io.Reader) (*models.ImportResu
 
 	for {
         record, err := csvReader.Read()
-        if err == io.EOF {
+        if errors.Is(err, io.EOF) {
             break
         }
         if err != nil {
@@ -85,7 +86,7 @@ func parseAndValidate(record []string, rowNum int) (*models.Product, error) {
     var tags []string
     if raw := strings.TrimSpace(record[4]); raw != "" {
         if err := json.Unmarshal([]byte(raw), &tags); err != nil {
-            return nil, fmt.Errorf("строка %d: tags невалидный JSON: %v", rowNum, err)
+            return nil, fmt.Errorf("строка %d: tags невалидный JSON: %w", rowNum, err)
         }
     }
 
