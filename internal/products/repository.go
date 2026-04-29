@@ -28,7 +28,7 @@ func FindByTags(ctx context.Context, db *sql.DB, tags []string, limit, offset in
             builder.WriteString(",")
         }
         escaped := strings.ReplaceAll(t, `"`, `\"`)
-        builder.WriteString(fmt.Sprintf(`"%s"`, escaped))
+        builder.WriteString(fmt.Sprintf(`"%q"`, escaped))
     }
     builder.WriteString("}")
     pgArray := builder.String()
@@ -46,7 +46,11 @@ func FindByTags(ctx context.Context, db *sql.DB, tags []string, limit, offset in
     if err != nil {
         return nil, fmt.Errorf("query failed: %w", err)
     }
-    defer rows.Close()
+    defer func() {
+        if err := rows.Close(); err != nil {
+            _ = err
+        }
+    }()
 
     var products []models.Product
     for rows.Next() {
