@@ -27,11 +27,11 @@ func FindByTags(ctx context.Context, db *sql.DB, tags []string, limit, offset in
         if i > 0 {
             builder.WriteString(",")
         }
-        escaped := strings.ReplaceAll(t, `"`, `\"`)
-        builder.WriteString(fmt.Sprintf(`"%q"`, escaped))
+        builder.WriteString(fmt.Sprintf("%q", t))
     }
     builder.WriteString("}")
     pgArray := builder.String()
+
 
     query := `
         SELECT sku, name, description, price, tags, category, rating,
