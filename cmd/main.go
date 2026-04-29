@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+
 	"astroapi/config"
 	"astroapi/internal/alisa"
 	"astroapi/internal/database"
@@ -28,6 +29,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nats-io/nats.go/jetstream"
+  "github.com/pressly/goose/v3"
 	"go.uber.org/zap"
 )
 
@@ -79,6 +81,8 @@ func run() error {
 			zapLogger.Error("failed to close database", zap.Error(closeErr))
 		}
 	}()
+
+	runMigrations(db, zapLogger)
 
 	natsConn, err := natsinfra.InitNATS(rootCtx, zapLogger, cfg)
 	if err != nil {
@@ -159,9 +163,11 @@ func run() error {
 	r.Use(astromidware.RequestLogger(zapLogger))
 	r.Use(middleware.Recoverer)
 
+
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
+	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
 
@@ -209,6 +215,16 @@ func run() error {
 
 	zapLogger.Info("server exited")
 	return nil
+}
+
+func runMigrations(db *database.PostgresDB, zapLogger *zap.Logger) {
+    if err := goose.SetDialect("postgres"); err != nil {
+        log.Fatal("Failed to set goose dialect:", err)
+    }
+    if err := goose.Up(db.DB, "./migrations"); err != nil {
+        log.Fatal("Failed to apply migrations:", err)
+    }
+    zapLogger.Info("Migrations applied")
 }
 
 func decodeEncryptionKey(encoded string) ([]byte, error) {
