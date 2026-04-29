@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"astroapi/internal/requests"
+	"astroapi/internal/usecases"
+	"astroapi/internal/usecases/repositories/domain"
 
 	"go.uber.org/zap"
 )
@@ -31,6 +33,22 @@ func (m *mockRequestsRepo) Create(ctx context.Context, req requests.Request) err
 	return m.err
 }
 
+type mockPersonalDataRepo struct {
+	err error
+}
+
+func (m *mockPersonalDataRepo) Save(ctx context.Context, data domain.PersonalData) error {
+	return m.err
+}
+
+type mockPersonalDataCache struct {
+	err error
+}
+
+func (m *mockPersonalDataCache) Save(ctx context.Context, data domain.PersonalData) error {
+	return m.err
+}
+
 func TestProfileHandler_HandleProfile(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -38,6 +56,8 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 		body           interface{}
 		mockPubErr     error
 		mockRepoErr    error
+		mockSaveErr    error
+		mockCacheErr   error
 		expectedStatus int
 	}{
 		{
@@ -48,7 +68,7 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 		{
 			name:           "Empty Body",
 			method:         http.MethodPost,
-			body:           "", // Пустое тело
+			body:           "",
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
@@ -61,7 +81,7 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 			name:   "Validation Failed (Bad UUID)",
 			method: http.MethodPost,
 			body: map[string]interface{}{
-				"user_id":       "not-a-uuid", // Ошибка валидации
+				"user_id":       "not-a-uuid",
 				"birth_date":    "1990-01-01",
 				"birth_place":   "Moscow",
 				"consent_given": true,
@@ -77,7 +97,31 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 				"birth_place":   "Moscow",
 				"consent_given": true,
 			},
-			mockRepoErr:    errors.New("db timeout"), // Имитируем падение БД
+			mockRepoErr:    errors.New("db timeout"),
+			expectedStatus: http.StatusInternalServerError,
+		},
+		{
+			name:   "Usecase Save Error",
+			method: http.MethodPost,
+			body: map[string]interface{}{
+				"user_id":       "123e4567-e89b-12d3-a456-426614174000",
+				"birth_date":    "1990-01-01",
+				"birth_place":   "Moscow",
+				"consent_given": true,
+			},
+			mockSaveErr:    errors.New("save failed"),
+			expectedStatus: http.StatusInternalServerError,
+		},
+		{
+			name:   "Usecase Cache Error",
+			method: http.MethodPost,
+			body: map[string]interface{}{
+				"user_id":       "123e4567-e89b-12d3-a456-426614174000",
+				"birth_date":    "1990-01-01",
+				"birth_place":   "Moscow",
+				"consent_given": false,
+			},
+			mockCacheErr:   errors.New("cache failed"),
 			expectedStatus: http.StatusInternalServerError,
 		},
 		{
@@ -89,7 +133,7 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 				"birth_place":   "Moscow",
 				"consent_given": true,
 			},
-			mockPubErr:     errors.New("nats connection lost"), // Имитируем падение NATS
+			mockPubErr:     errors.New("nats connection lost"),
 			expectedStatus: http.StatusInternalServerError,
 		},
 		{
@@ -109,8 +153,11 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockPub := &mockMsgPublisher{err: tt.mockPubErr}
 			mockRepo := &mockRequestsRepo{err: tt.mockRepoErr}
+			mockDataRepo := &mockPersonalDataRepo{err: tt.mockSaveErr}
+			mockCache := &mockPersonalDataCache{err: tt.mockCacheErr}
 
-			handler := NewProfileHandler(mockPub, mockRepo, zap.NewNop())
+			uc := usecases.NewProcessPersonalDataUseCase(mockDataRepo, mockCache)
+			handler := NewProfileHandler(mockPub, mockRepo, uc, zap.NewNop())
 
 			var reqBody []byte
 			if strBody, ok := tt.body.(string); ok {
@@ -125,9 +172,8 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 
 			handler.HandleProfile(rr, req)
 
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v",
-					status, tt.expectedStatus)
+			if rr.Code != tt.expectedStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, tt.expectedStatus)
 			}
 		})
 	}

@@ -11,6 +11,7 @@ import (
 	"astroapi/internal/alisa"
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
+	"astroapi/internal/resilience"
 	"astroapi/internal/user"
 
 	"github.com/google/uuid"
@@ -147,6 +148,10 @@ func (h *RecommendHandler) handleSync(w http.ResponseWriter, r *http.Request, re
 		}
 		if errors.Is(err, user.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "user profile not found")
+			return
+		}
+		if resilience.IsServiceUnavailable(err) {
+			writeError(w, http.StatusServiceUnavailable, "service temporarily unavailable")
 			return
 		}
 		h.logger.Error("recommend sync failed", zap.Error(err))

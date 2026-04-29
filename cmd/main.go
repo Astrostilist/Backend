@@ -19,11 +19,14 @@ import (
 	"astroapi/internal/handlers"
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/logger"
+	"astroapi/internal/metrics"
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
 	"astroapi/internal/products"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
+	"astroapi/internal/usecases"
+	repositories "astroapi/internal/usecases/repositories"
 	"astroapi/internal/user"
 
 	"github.com/go-chi/chi/v5"
@@ -39,6 +42,7 @@ const (
 	httpIdleTimeout  = 60 * time.Second
 	initTimeout      = 15 * time.Second
 	shutdownTimeout  = 30 * time.Second
+	cacheTTL         = 5 * time.Minute
 )
 
 func main() {
@@ -111,7 +115,16 @@ func run() error {
 	rulesRepo := rules.NewPostgresRepository(db.DB)
 	productsRepo := products.NewPostgresRepository(db.DB)
 
-	aiClient := alisa.NewClient(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL)
+	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
+	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
+	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
+
+	metricsRegistry := metrics.NewRegistry()
+	aiClient := alisa.NewClientWithOptions(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL, alisa.ClientOptions{
+		Logger:     zapLogger,
+		Metrics:    metricsRegistry,
+		MaxRetries: 3,
+	})
 
 	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, zapLogger)
 	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, zapLogger)
@@ -124,32 +137,39 @@ func run() error {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
+
 	go func() {
 		defer wg.Done()
-		if err := consumer.ConsumeWithHandler(rootCtx, models.MsgStreamEvents, models.MsgProfileWrk,
+		if consumeErr := consumer.ConsumeWithHandler(
+			rootCtx,
+			models.MsgStreamEvents,
+			models.MsgProfileWrk,
 			func(ctx context.Context, msg jetstream.Msg) error {
 				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
-			}); err != nil {
-			zapLogger.Error("profile worker failed", zap.Error(err))
-		}
-		<-rootCtx.Done()
-	}()
-	go func() {
-		defer wg.Done()
-		if err := consumer.ConsumeWithHandler(rootCtx, models.MsgStreamEvents, models.MsgRecommendWrk,
-			func(ctx context.Context, msg jetstream.Msg) error {
-				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
-			}); err != nil {
-			zapLogger.Error("recommend worker failed", zap.Error(err))
+			},
+		); consumeErr != nil {
+			zapLogger.Error("profile worker failed", zap.Error(consumeErr))
 		}
 		<-rootCtx.Done()
 	}()
 
-	// --- HTTP Handlers ---
+	go func() {
+		defer wg.Done()
+		if consumeErr := consumer.ConsumeWithHandler(
+			rootCtx,
+			models.MsgStreamEvents,
+			models.MsgRecommendWrk,
+			func(ctx context.Context, msg jetstream.Msg) error {
+				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
+			},
+		); consumeErr != nil {
+			zapLogger.Error("recommend worker failed", zap.Error(consumeErr))
+		}
+		<-rootCtx.Done()
+	}()
+
 	helloHandler := handlers.NewHelloHandler(handlers.NewRealHelloService(db))
-
-	// Здесь теперь передаются все 3 нужных аргумента
-	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, zapLogger)
+	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
@@ -165,6 +185,7 @@ func run() error {
 
 
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
+	r.Get("/metrics", metricsRegistry.Handler)
 	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
@@ -187,29 +208,31 @@ func run() error {
 	serverErr := make(chan error, 1)
 	go func() {
 		zapLogger.Info("app starting", zap.String("addr", srv.Addr))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErr <- err
+		if listenErr := srv.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
+			serverErr <- listenErr
 		}
 		close(serverErr)
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
 	select {
 	case <-quit:
 		zapLogger.Info("shutdown signal received")
-	case err := <-serverErr:
-		if err != nil {
-			return err
+	case serverRunErr := <-serverErr:
+		if serverRunErr != nil {
+			return serverRunErr
 		}
 	}
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancelShutdown()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		zapLogger.Error("server shutdown error", zap.Error(err))
+	if shutdownErr := srv.Shutdown(shutdownCtx); shutdownErr != nil {
+		zapLogger.Error("server shutdown error", zap.Error(shutdownErr))
 	}
+
 	rootCancel()
 	wg.Wait()
 
@@ -231,12 +254,15 @@ func decodeEncryptionKey(encoded string) ([]byte, error) {
 	if encoded == "" {
 		return nil, errors.New("ENCRYPTION_KEY is not set")
 	}
+
 	key, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, errors.New("ENCRYPTION_KEY must be valid base64")
 	}
+
 	if len(key) != 32 {
 		return nil, errors.New("ENCRYPTION_KEY must decode to 32 bytes")
 	}
+
 	return key, nil
 }
