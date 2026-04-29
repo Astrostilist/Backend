@@ -14,22 +14,23 @@ import (
 
 
 	"astroapi/config"
-    "astroapi/internal/alisa"
-    "astroapi/internal/database"
-    "astroapi/internal/handlers"
-    natsinfra "astroapi/internal/infrastructure/nats"
-    "astroapi/internal/logger"
-    astromidware "astroapi/internal/middleware"
-    "astroapi/internal/models"
-    "astroapi/internal/requests"
-    rules "astroapi/internal/ruleengine"
-    "astroapi/internal/user"
+	"astroapi/internal/alisa"
+	"astroapi/internal/database"
+	"astroapi/internal/handlers"
+	natsinfra "astroapi/internal/infrastructure/nats"
+	"astroapi/internal/logger"
+	astromidware "astroapi/internal/middleware"
+	"astroapi/internal/models"
+	"astroapi/internal/products"
+	"astroapi/internal/requests"
+	rules "astroapi/internal/ruleengine"
+	"astroapi/internal/user"
 
-    "github.com/go-chi/chi/v5"
-    "github.com/go-chi/chi/v5/middleware"
-    "github.com/nats-io/nats.go/jetstream"
-    "github.com/pressly/goose/v3"
-    "go.uber.org/zap"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/nats-io/nats.go/jetstream"
+  "github.com/pressly/goose/v3"
+	"go.uber.org/zap"
 )
 
 const (
@@ -108,6 +109,7 @@ func run() error {
 	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
 	requestsRepo := requests.NewPostgresRepository(db.DB)
 	rulesRepo := rules.NewPostgresRepository(db.DB)
+	productsRepo := products.NewPostgresRepository(db.DB)
 
 	aiClient := alisa.NewClient(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL)
 
@@ -150,6 +152,7 @@ func run() error {
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
+	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
 
 	dlqreader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqreader, zapLogger)
@@ -166,6 +169,7 @@ func run() error {
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
+	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
 
 	r.Group(func(r chi.Router) {
 		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))
