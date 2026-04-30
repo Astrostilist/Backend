@@ -3,24 +3,24 @@ package ruleengine
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
-//go:generate mockgen -source=rules.go -destination=mocks/mock_rules.go -package=mocks
-
 type Rule struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	AstroCondition map[string]any `json:"astro_condition"`
-	ProductTags    []string       `json:"product_tags"`
-	Priority       int            `json:"priority"`
-	IsActive       bool           `json:"is_active"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ID             uuid.UUID         `json:"id,omitzero"`
+	Name           string            `json:"name,omitzero"`
+	AstroCondition map[string]string `json:"astro_condition,omitzero"`
+	ProductTags    []string          `json:"product_tags,omitzero"`
+	Priority       int               `json:"priority,omitzero"`
+	IsActive       bool              `json:"is_active,omitzero"`
+	CreatedAt      time.Time         `json:"created_at,omitzero"`
+	UpdatedAt      time.Time         `json:"updated_at,omitzero"`
 }
 
 type RuleInput struct {
 	Name           string
-	AstroCondition map[string]any
+	AstroCondition map[string]string
 	ProductTags    []string
 	Priority       int
 	IsActive       bool
@@ -28,19 +28,51 @@ type RuleInput struct {
 
 type ListOptions struct {
 	IsActive *bool
-	Limit    int
-	Offset   int
+	Limit    int // pageSize
+	Offset   int // page
 }
 
 type ListResult struct {
 	Items      []Rule
 	TotalCount int
 }
-
 type Repository interface {
-	List(ctx context.Context, options ListOptions) (ListResult, error)
-	Create(ctx context.Context, input RuleInput) (Rule, error)
-	Update(ctx context.Context, id string, input RuleInput) (Rule, error)
-	Deactivate(ctx context.Context, id string) (Rule, error)
+	Create(ctx context.Context, input *RuleInput) (uuid.UUID, error)
+	Get(ctx context.Context, id string) (*Rule, error)
+	Update(ctx context.Context, id string, input *RuleInput) (uuid.UUID, error)
+	Delete(ctx context.Context, id string) error
+	List(ctx context.Context, options ListOptions) ([]*Rule, Metadata, error)
+	Deactivate(ctx context.Context, id string) (*Rule, error)
 	Match(ctx context.Context, triggers []string) ([]string, error)
+}
+
+type Metadata struct {
+	CurrentPage  int `json:"current_page,omitzero"`
+	PageSize     int `json:"page_size,omitzero"`
+	FirstPage    int `json:"first_page,omitzero"`
+	LastPage     int `json:"last_page,omitzero"`
+	TotalRecords int `json:"total_records,omitzero"`
+}
+
+// calculateMetadata - формирует данные для структруры Metadata
+func calculateMetadata(totalRecords, page, pageSize int) Metadata {
+	if totalRecords == 0 {
+		return Metadata{}
+	}
+
+	return Metadata{
+		CurrentPage:  page,
+		PageSize:     pageSize,
+		FirstPage:    1,
+		LastPage:     (totalRecords + pageSize - 1) / pageSize,
+		TotalRecords: totalRecords,
+	}
+}
+
+func (f ListOptions) limit() int {
+	return f.Limit
+}
+
+func (f ListOptions) offset() int {
+	return (f.Offset - 1) * f.Limit
 }
