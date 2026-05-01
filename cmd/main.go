@@ -173,12 +173,6 @@ func run() error {
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
 
-	// Feedback and Polling Handlers
-	// feedbackRepo := repositories.NewFeedbackRepository(db.DB)
-	// feedbackHandler := handlers.NewFeedbackHandler(feedbackRepo)
-	// Assuming you have a result handler based on the PR name. If the handler variable is named differently, adjust here.
-	// resultHandler := handlers.NewResultHandler(...)
-
 	dlqreader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqreader, zapLogger)
 
@@ -192,9 +186,6 @@ func run() error {
 	r.Get("/metrics", metricsRegistry.Handler)
 	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
-	// r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
-	// r.Get("/api/v1/astro/result/{request_id}", resultHandler.GetResult) // Uncomment and adjust path for result polling
-
 	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
