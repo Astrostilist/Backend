@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"astroapi/internal/models"
 	"context"
 	"fmt"
 
@@ -19,6 +20,10 @@ type MsgPublisher interface {
 	PublishMessage(ctx context.Context, streamName, subject string, payload any) error
 }
 
+type MsgDLQReader interface {
+	GetMessages(ctx context.Context) ([]models.Message, error)
+}
+
 // HandlerFunc — функциональный адаптер под EventHandler.
 type HandlerFunc func(ctx context.Context, payload []byte) error
 
@@ -33,6 +38,10 @@ type MsgRouter struct {
 }
 
 func NewMsgRouter(logger *zap.Logger) *MsgRouter {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
 	return &MsgRouter{
 		handlers: make(map[string]EventHandler),
 		logger:   logger,
