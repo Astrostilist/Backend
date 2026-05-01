@@ -20,3 +20,4 @@ ENCRYPTION_KEY=
 **Поведение:**
 consent_given = true  → данные сохраняются в PostgreSQL
 consent_given = false → данные сохраняются только в cache (Memcached)
+

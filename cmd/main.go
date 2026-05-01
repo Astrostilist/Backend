@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-
 	"astroapi/config"
 	"astroapi/internal/alisa"
 	"astroapi/internal/database"
@@ -32,7 +31,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nats-io/nats.go/jetstream"
-  "github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3"
 	"go.uber.org/zap"
 )
 
@@ -183,7 +182,6 @@ func run() error {
 	r.Use(astromidware.RequestLogger(zapLogger))
 	r.Use(middleware.Recoverer)
 
-
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 	r.Get("/metrics", metricsRegistry.Handler)
 	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
@@ -241,13 +239,13 @@ func run() error {
 }
 
 func runMigrations(db *database.PostgresDB, zapLogger *zap.Logger) {
-    if err := goose.SetDialect("postgres"); err != nil {
-        log.Fatal("Failed to set goose dialect:", err)
-    }
-    if err := goose.Up(db.DB, "./migrations"); err != nil {
-        log.Fatal("Failed to apply migrations:", err)
-    }
-    zapLogger.Info("Migrations applied")
+	if err := goose.SetDialect("postgres"); err != nil {
+		log.Fatal("Failed to set goose dialect:", err)
+	}
+	if err := goose.Up(db.DB, "./migrations"); err != nil {
+		log.Fatal("Failed to apply migrations:", err)
+	}
+	zapLogger.Info("Migrations applied")
 }
 
 func decodeEncryptionKey(encoded string) ([]byte, error) {
