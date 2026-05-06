@@ -10,7 +10,7 @@ import (
 )
 
 type FeedbackRepository interface {
-	Create(f *models.Feedback) error
+	Create(ctx context.Context, f *models.Feedback) error
 }
 
 type feedbackPG struct {
@@ -21,12 +21,12 @@ func NewFeedbackRepository(db *sql.DB) FeedbackRepository {
 	return &feedbackPG{db: db}
 }
 
-func (r *feedbackPG) Create(f *models.Feedback) error {
+func (r *feedbackPG) Create(ctx context.Context, f *models.Feedback) error {
 	query := `
 		INSERT INTO feedback (id, request_id, rating, comment, created_at)
 		VALUES ($1, $2, $3, $4, $5)
 	`
-	_, err := r.db.ExecContext(context.Background(), query, f.ID, f.RequestID, f.Rating, f.Comment, f.CreatedAt)
+	_, err := r.db.ExecContext(ctx, query, f.ID, f.RequestID, f.Rating, f.Comment, f.CreatedAt)
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "unique constraint") || strings.Contains(errStr, "23505") {
