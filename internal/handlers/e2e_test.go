@@ -69,6 +69,21 @@ func (m *memRequestsRepo) Create(_ context.Context, r requests.Request) error {
 	return nil
 }
 
+func (m *memRequestsRepo) StartProcessing(_ context.Context, id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.items[id]
+	if !ok {
+		return false, requests.ErrNotFound
+	}
+	if r.Status != requests.StatusPending {
+		return false, nil
+	}
+	r.Status = requests.StatusProcessing
+	m.items[id] = r
+	return true, nil
+}
+
 func (m *memRequestsRepo) UpdateStatus(_ context.Context, id, status string, result []byte, reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -167,7 +182,7 @@ func startNATS(t *testing.T) (host, port string) {
 // ---- e2e ------------------------------------------------------------
 
 // TestE2E_ProfilePipeline: HTTP POST /astro/profile → NATS → ProfileProcessor
-// сохраняет пользователя и апдейтит requests_log в статус completed.
+// сохраняет пользователя и апдейтит результат генерации в статус completed.
 func TestE2E_ProfilePipeline(t *testing.T) {
 	host, port := startNATS(t)
 
@@ -231,7 +246,7 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 }
 
 // TestE2E_RecommendPipeline: async POST /astro/recommend → NATS → RecommendProcessor
-// вызывает AI, пишет completed в requests_log.
+// вызывает AI, пишет completed в результат генерации.
 func TestE2E_RecommendPipeline(t *testing.T) {
 	host, port := startNATS(t)
 
