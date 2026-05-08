@@ -78,7 +78,7 @@ func initializeMetrics(cfg *config.Config) {
 
 	// metrics register
 	registry.MustRegister(rawDlqMessagesTotal)
-	registry.MustRegister(rawHttpRequestDuration)
+	registry.MustRegister(rawHTTPRequestDuration)
 	registry.MustRegister(rawNatsConsumerLag)
 	registry.MustRegister(rawCircuitBreakerState)
 
