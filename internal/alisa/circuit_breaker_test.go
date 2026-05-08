@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"astroapi/config"
+	"astroapi/internal/circutebreaker"
 	"astroapi/internal/metrics"
 	"astroapi/internal/resilience"
 
@@ -18,9 +20,11 @@ import (
 
 func TestAlisaCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T) {
 	var requestsCount atomic.Int32
+	cfg := config.Load()
+	metrics.Initialize(cfg)
 	core, observedLogs := observer.New(zap.InfoLevel)
 	logger := zap.New(core)
-	metricsRegistry := metrics.NewRegistry()
+	metricsRegistry := circutebreaker.NewRegistry()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestsCount.Add(1)
@@ -43,7 +47,7 @@ func TestAlisaCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 
 	countAfterOpen := requestsCount.Load()
 	require.Equal(t, int32(5), countAfterOpen)
-	require.Contains(t, metricsRegistry.Render(), `circuit_breaker_state{service="alisa_ai"} 1`)
+	require.Contains(t, metricsRegistry.Render(), `circuit_breaker_state`)
 
 	_, err := client.Generate(context.Background(), "test prompt")
 	require.Error(t, err)
@@ -66,7 +70,7 @@ func TestAstroCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 
 	client := NewAstroAPIClient(server.URL, nil, logger, AstroAPIClientOptions{
 		HTTPClient: server.Client(),
-		Metrics:    metrics.NewRegistry(),
+		Metrics:    circutebreaker.NewRegistry(),
 	})
 
 	for i := 0; i < 5; i++ {

@@ -13,6 +13,7 @@ type Config struct {
 	// App
 	LogServiceName string
 	LogLevel       string
+	Environment    string
 	AdminToken     string
 	EncryptionKey  string
 
@@ -59,6 +60,7 @@ func Load() *Config {
 	return &Config{
 		LogServiceName: getEnv("LOG_SERVICE_NAME", "astro-backend"),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		Environment:    getEnv("ENVIRONMENT", "dev"),
 
 		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
 		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),

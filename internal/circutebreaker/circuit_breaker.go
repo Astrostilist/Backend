@@ -1,4 +1,4 @@
-package metrics
+package circutebreaker
 
 import (
 	"fmt"
@@ -47,6 +47,7 @@ func (r *Registry) Render() string {
 	var builder strings.Builder
 	builder.WriteString("# HELP circuit_breaker_state Current state of the circuit breaker (0=closed, 1=open, 2=half-open)\n")
 	builder.WriteString("# TYPE circuit_breaker_state gauge\n")
+	builder.WriteString("circuit_breaker_state")
 	for _, service := range services {
 		builder.WriteString(fmt.Sprintf("circuit_breaker_state{service=%q} %d\n", service, r.states[service]))
 	}

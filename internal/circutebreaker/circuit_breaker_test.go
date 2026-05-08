@@ -1,6 +1,8 @@
-package metrics
+package circutebreaker
 
 import (
+	"astroapi/config"
+	"astroapi/internal/metrics"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +11,8 @@ import (
 )
 
 func TestMetricsHandlerExposesCircuitBreakerState(t *testing.T) {
+	cfg := config.Load()
+	metrics.Initialize(cfg)
 	registry := NewRegistry()
 	registry.SetCircuitBreakerState("alisa_ai", 0)
 

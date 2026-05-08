@@ -121,15 +121,15 @@ func (d *DLQReader) GetMessages(ctx context.Context) ([]models.Message, error) {
 		return nil, fmt.Errorf("failed to get stream '%s': %w", models.MsgStreamDLQ, err)
 	}
 
-	consumer, err = stream.Consumer(ctx, models.MsgDQLViewer)
+	consumer, err = stream.Consumer(ctx, models.MsgDLQViewer)
 	if err != nil {
 		if errors.Is(err, jetstream.ErrConsumerNotFound) {
 			consumer, err = d.sm.initDLQConsumer(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create consumer %s: %w", models.MsgDQLViewer, err)
+				return nil, fmt.Errorf("failed to create consumer %s: %w", models.MsgDLQViewer, err)
 			}
 		} else {
-			return nil, fmt.Errorf("failed to get consumer %s: %w", models.MsgDQLViewer, err)
+			return nil, fmt.Errorf("failed to get consumer %s: %w", models.MsgDLQViewer, err)
 		}
 	}
 
