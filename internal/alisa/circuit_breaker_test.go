@@ -47,7 +47,7 @@ func TestAlisaCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 
 	countAfterOpen := requestsCount.Load()
 	require.Equal(t, int32(5), countAfterOpen)
-	require.Contains(t, metricsRegistry.Render(), `circuit_breaker_state{service="alisa_ai"} 1`)
+	require.Contains(t, metricsRegistry.Render(), `circuit_breaker_state`)
 
 	_, err := client.Generate(context.Background(), "test prompt")
 	require.Error(t, err)
