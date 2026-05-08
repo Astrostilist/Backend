@@ -1,6 +1,8 @@
 package alisa
 
 import (
+	"astroapi/config"
+	"astroapi/internal/metrics"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -95,6 +97,8 @@ func (b *fakeAstroCacheBucket) Put(_ context.Context, key string, value []byte) 
 func TestGetAstroProfileUsesCacheOnSecondCall(t *testing.T) {
 	var httpRequests atomic.Int32
 
+	cfg := config.Load()
+	metrics.Initialize(cfg)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		httpRequests.Add(1)
 		_, _ = w.Write([]byte(`{"birth_date":"1992-06-26","birth_place":"Moscow","birth_time":"08:30"}`))

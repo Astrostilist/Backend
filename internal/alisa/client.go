@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"astroapi/internal/metrics"
+	"astroapi/internal/circutebreaker"
 	"astroapi/internal/resilience"
 
 	"go.uber.org/zap"
@@ -43,7 +43,7 @@ type ClientOptions struct {
 	HTTPClient *http.Client
 	MaxRetries int
 	Logger     *zap.Logger
-	Metrics    *metrics.Registry
+	Metrics    *circutebreaker.Registry
 	Breaker    *resilience.CircuitBreaker
 }
 

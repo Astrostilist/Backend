@@ -1,0 +1,10 @@
+groups:
+  - name: nats
+    rules:
+      - alert: DLQMessagesDetected
+        expr: dlq_messages_total > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DLQ messages detected"

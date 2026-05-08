@@ -5,7 +5,8 @@ const (
 	MsgStreamDLQ     = "astro_dlq"
 	MsgProfileWrk    = "astro-profile-worker"
 	MsgRecommendWrk  = "astro-recommend-worker"
-	MsgDQLViewer     = "astro-dlq-viewer"
+	MsgDLQViewer     = "astro-dlq-viewer"
+	MsgDLQSubj       = "astro.dlq."
 	MsgSMaxRetries   = 5
 	MsgProfileSubj   = "astro.events.profile"
 	MsgRecommendSubj = "astro.events.recommend"
@@ -16,3 +17,7 @@ type Message struct {
 	Headers map[string][]string `json:"headers"`
 	Data    string              `json:"data"`
 }
+
+var DLQSubjectMap = map[string]string{
+	MsgProfileSubj:   "astro.dlq.profile",
+	MsgRecommendSubj: "astro.dlq.recommend"}

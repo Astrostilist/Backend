@@ -1,6 +1,7 @@
 package resilience
 
 import (
+	"astroapi/internal/metrics"
 	"errors"
 	"fmt"
 	"sync"
@@ -13,6 +14,10 @@ const (
 	StateClosed = iota
 	StateOpen
 	StateHalfOpen
+)
+
+const (
+	AlisaServiceName = "alisa_ai"
 )
 
 var ErrCircuitBreakerOpen = errors.New("circuit breaker is open")
@@ -165,9 +170,7 @@ func (cb *CircuitBreaker) transitionLocked(newState int, reason string) {
 }
 
 func (cb *CircuitBreaker) reportStateLocked(state int) {
-	if cb.reporter != nil {
-		cb.reporter.SetCircuitBreakerState(cb.serviceName, state)
-	}
+	metrics.SetCircuitBreakerState(AlisaServiceName, state)
 }
 
 func stateName(state int) string {

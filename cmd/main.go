@@ -71,6 +71,7 @@ func run() error {
 			log.Printf("failed to sync logger: %v", syncErr)
 		}
 	}()
+	metrics.Initialize(cfg)
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
@@ -118,12 +119,8 @@ func run() error {
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 
-	metricsRegistry := metrics.NewRegistry()
-	aiClient := alisa.NewClientWithOptions(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL, alisa.ClientOptions{
-		Logger:     zapLogger,
-		Metrics:    metricsRegistry,
-		MaxRetries: 3,
-	})
+	aiClient := alisa.NewClientWithOptions(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL,
+		alisa.ClientOptions{MaxRetries: 3})
 
 	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, zapLogger)
 	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, zapLogger)
@@ -135,9 +132,8 @@ func run() error {
 	consumer := natsinfra.NewMessageConsumer(jsAdapter, zapLogger)
 
 	var wg sync.WaitGroup
-	wg.Add(2)
 
-	go func() {
+	wg.Go(func() {
 		defer wg.Done()
 		if consumeErr := consumer.ConsumeWithHandler(
 			rootCtx,
@@ -150,9 +146,9 @@ func run() error {
 			zapLogger.Error("profile worker failed", zap.Error(consumeErr))
 		}
 		<-rootCtx.Done()
-	}()
+	})
 
-	go func() {
+	wg.Go(func() {
 		defer wg.Done()
 		if consumeErr := consumer.ConsumeWithHandler(
 			rootCtx,
@@ -165,7 +161,13 @@ func run() error {
 			zapLogger.Error("recommend worker failed", zap.Error(consumeErr))
 		}
 		<-rootCtx.Done()
-	}()
+	})
+
+	wg.Go(func() {
+		defer wg.Done()
+		natsinfra.StartLagMonitor(rootCtx, jsAdapter)
+		<-rootCtx.Done()
+	})
 
 	helloHandler := handlers.NewHelloHandler(handlers.NewRealHelloService(db))
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
@@ -179,11 +181,12 @@ func run() error {
 	// Настраиваем роутер chi и middleware (единый блок)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
+	r.Use(astromidware.RequestMetricsMiddleware())
 	r.Use(astromidware.RequestLogger(zapLogger))
+
 	r.Use(middleware.Recoverer)
 
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
-	r.Get("/metrics", metricsRegistry.Handler)
 	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
@@ -194,6 +197,8 @@ func run() error {
 		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))
 		r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
 	})
+	// Observability Routes
+	r.Handle("/metrics", metrics.NewHandler())
 
 	srv := &http.Server{
 		Addr:         ":8080",

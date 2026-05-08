@@ -1,0 +1,15 @@
+# Локальная среда: API и метрики/health на 127.0.0.1 + healthcheck через curl (образ приложения).
+
+services:
+  app:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - NATS_HOST=nats 
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy

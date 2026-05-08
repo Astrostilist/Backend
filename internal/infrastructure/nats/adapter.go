@@ -5,8 +5,11 @@ import (
 	"astroapi/internal/models"
 	"context"
 	"fmt"
+
 	"strconv"
 	"time"
+
+	"astroapi/internal/metrics"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -145,7 +148,7 @@ func (r *JetStreamAdapter) initDLQConsumer(ctx context.Context) (jetstream.Consu
 	var err error
 
 	consumerCfg := jetstream.ConsumerConfig{
-		Name:              models.MsgDQLViewer,
+		Name:              models.MsgDLQViewer,
 		FilterSubjects:    []string{fmt.Sprint(models.MsgProfileSubj, ".>"), fmt.Sprint(models.MsgRecommendSubj, ".>")},
 		DeliverPolicy:     jetstream.DeliverLastPolicy,
 		AckPolicy:         jetstream.AckExplicitPolicy,
@@ -178,7 +181,11 @@ func (r *JetStreamAdapter) publishMsg(ctx context.Context, subject, streamName s
 
 func (r *JetStreamAdapter) publishToDLQ(ctx context.Context, originalMsg jetstream.Msg, reason string, id uint64) error {
 
-	subject := originalMsg.Subject()
+	origsubject := originalMsg.Subject()
+	subject, exists := models.DLQSubjectMap[origsubject]
+	if !exists {
+		subject = models.MsgDLQSubj
+	}
 	msg := nats.Msg{
 		Data:    originalMsg.Data(),
 		Subject: subject,
@@ -196,10 +203,13 @@ func (r *JetStreamAdapter) publishToDLQ(ctx context.Context, originalMsg jetstre
 	ack, err := r.PublishMsg(pubCtx, &msg, jetstream.WithExpectStream(models.MsgStreamDLQ))
 	if err != nil {
 		r.logger.Error("Failed to publish to DLQ",
+			zap.String("stream", models.MsgStreamDLQ),
 			zap.String("subject", subject),
 			zap.String("error", err.Error()))
 		return fmt.Errorf("DLQ publish failed: %w", err)
 	}
+
+	metrics.IncdlqMessagesTotal()
 
 	r.logger.Warn("Message sent to DLQ",
 		zap.String("original_subject", subject),
