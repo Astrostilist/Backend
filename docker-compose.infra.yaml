@@ -1,7 +1,7 @@
-# docker-compose.local.yaml — локальная разработка.
+# docker-compose.infra.yaml — только инфраструктура для локальной разработки.
 # Поднимает ТОЛЬКО инфраструктуру (postgres, nats, memcached, jaeger)
 # с проброшенными портами на localhost. Приложение запускается на хосте:
-#   make local-up
+#   make infra-up
 #   make run  # приложение читает .env (см. .env.local.template)
 
 services:

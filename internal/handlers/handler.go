@@ -40,7 +40,7 @@ func (h *HelloHandler) HelloWorldHandler(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(Response{
-		Message: "Hello world",
+		Message: "Hello world!",
 		Data:    map[string]any{"database_status": dbStatus},
 	}); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)

@@ -5,7 +5,8 @@ BINARY_NAME   := astro-backend
 BUILD_DIR     := bin
 CMD_PATH      := ./cmd
 ENV_FILE      := .env
-LOCAL_COMPOSE := docker-compose.local.yaml
+INFRA_COMPOSE := docker-compose.infra.yaml
+DEV_COMPOSE   := docker-compose.dev.yaml
 PROD_COMPOSE  := docker-compose.yaml
 GOBIN         := $(shell go env GOPATH)/bin
 
@@ -104,14 +105,26 @@ docker-up: ## start full stack (prod compose, app + infra in docker)
 docker-down: ## stop full stack
 	docker compose -f $(PROD_COMPOSE) down
 
-local-up: ## start only infra (postgres/nats/memcached/jaeger) for local dev
-	docker compose -f $(LOCAL_COMPOSE) up -d
+infra-up: ## start only infra (postgres/nats/memcached/jaeger) for local dev
+	docker compose -f $(INFRA_COMPOSE) up -d
 
-local-down: ## stop local infra
-	docker compose -f $(LOCAL_COMPOSE) down
+infra-down: ## stop local infra
+	docker compose -f $(INFRA_COMPOSE) down
 
-local-logs: ## tail local infra logs
-	docker compose -f $(LOCAL_COMPOSE) logs -f
+infra-logs: ## tail local infra logs
+	docker compose -f $(INFRA_COMPOSE) logs -f
+
+dev-up: ## start local infra AND app with hot-reload (air)
+	docker compose -f $(DEV_COMPOSE) up -d --build
+
+dev-down: ## stop local environment
+	docker compose -f $(DEV_COMPOSE) down
+
+dev-logs: ## tail logs 
+	docker compose -f $(DEV_COMPOSE) logs -f
+
+dev-restart: ## rebuild and restart only the app
+	docker compose -f $(DEV_COMPOSE) up -d --build --force-recreate app
 
 # ---- migrations -----------------------------------------------------
 # Ожидает переменную окружения DB_DSN, например:
