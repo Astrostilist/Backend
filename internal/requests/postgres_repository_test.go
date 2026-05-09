@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"regexp"
 	"testing"
 
 	"astroapi/internal/requests"
@@ -25,17 +24,47 @@ func TestCreate_Success(t *testing.T) {
 	repo, db, mock := newRepo(t)
 	defer db.Close()
 
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO requests_log`)).
-		WithArgs("req-1", "u-1", "profile", requests.StatusAccepted, 0).
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO requests_log`).
+		WithArgs("req-1", "u-1", "profile", requests.StatusPending, 0).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO generation_results`).
+		WithArgs("req-1", requests.StatusPending).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
 
 	err := repo.Create(context.Background(), requests.Request{
 		RequestID: "req-1",
 		UserID:    "u-1",
 		Scenario:  "profile",
-		Status:    requests.StatusAccepted,
+		Status:    requests.StatusPending,
 	})
 	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCreate_GenerationResultsError(t *testing.T) {
+	t.Parallel()
+	repo, db, mock := newRepo(t)
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO requests_log`).
+		WithArgs("req-1", "u-1", "profile", requests.StatusPending, 0).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO generation_results`).
+		WithArgs("req-1", requests.StatusPending).
+		WillReturnError(errors.New("conn refused"))
+	mock.ExpectRollback()
+
+	err := repo.Create(context.Background(), requests.Request{
+		RequestID: "req-1",
+		UserID:    "u-1",
+		Scenario:  "profile",
+		Status:    requests.StatusPending,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "insert generation_results")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -44,12 +73,15 @@ func TestCreate_DBError(t *testing.T) {
 	repo, db, mock := newRepo(t)
 	defer db.Close()
 
+	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO requests_log`).
 		WillReturnError(errors.New("conn refused"))
+	mock.ExpectRollback()
 
 	err := repo.Create(context.Background(), requests.Request{RequestID: "x"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "insert requests_log")
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestUpdateStatus_Completed_WithResult(t *testing.T) {
@@ -58,9 +90,14 @@ func TestUpdateStatus_Completed_WithResult(t *testing.T) {
 	defer db.Close()
 
 	payload := []byte(`{"text":"ok"}`)
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE requests_log`)).
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE generation_results`).
 		WithArgs("req-1", requests.StatusCompleted, string(payload), "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE requests_log`).
+		WithArgs("req-1", requests.StatusCompleted, string(payload), "").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 
 	err := repo.UpdateStatus(context.Background(), "req-1", requests.StatusCompleted, payload, "")
 	require.NoError(t, err)
@@ -72,10 +109,14 @@ func TestUpdateStatus_Failed_WithReason(t *testing.T) {
 	repo, db, mock := newRepo(t)
 	defer db.Close()
 
-	// payload=nil → resultArg=nil
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE generation_results`).
+		WithArgs("req-2", requests.StatusFailed, nil, "user not found").
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE requests_log`).
 		WithArgs("req-2", requests.StatusFailed, nil, "user not found").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 
 	err := repo.UpdateStatus(context.Background(), "req-2", requests.StatusFailed, nil, "user not found")
 	require.NoError(t, err)
@@ -87,12 +128,15 @@ func TestUpdateStatus_NotFound(t *testing.T) {
 	repo, db, mock := newRepo(t)
 	defer db.Close()
 
-	mock.ExpectExec(`UPDATE requests_log`).
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE generation_results`).
 		WithArgs("ghost", requests.StatusCompleted, nil, "").
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
 
 	err := repo.UpdateStatus(context.Background(), "ghost", requests.StatusCompleted, nil, "")
 	require.ErrorIs(t, err, requests.ErrNotFound)
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestGet_Found(t *testing.T) {
@@ -104,7 +148,7 @@ func TestGet_Found(t *testing.T) {
 		"request_id", "user_id", "scenario", "status", "attempt_count", "error_reason", "result_payload",
 	}).AddRow("req-1", "u-1", "profile", requests.StatusCompleted, 1, "", `{"ok":true}`)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT request_id, user_id, scenario, status, attempt_count`)).
+	mock.ExpectQuery(`FROM generation_results`).
 		WithArgs("req-1").
 		WillReturnRows(rows)
 
@@ -122,7 +166,7 @@ func TestGet_NotFound(t *testing.T) {
 	repo, db, mock := newRepo(t)
 	defer db.Close()
 
-	mock.ExpectQuery(`SELECT request_id`).
+	mock.ExpectQuery(`FROM generation_results`).
 		WithArgs("nope").
 		WillReturnError(sql.ErrNoRows)
 
@@ -137,13 +181,43 @@ func TestGet_EmptyResultPayload(t *testing.T) {
 
 	rows := sqlmock.NewRows([]string{
 		"request_id", "user_id", "scenario", "status", "attempt_count", "error_reason", "result_payload",
-	}).AddRow("req-2", "u-1", "profile", requests.StatusAccepted, 0, "", "")
+	}).AddRow("req-2", "u-1", "profile", requests.StatusPending, 0, "", "")
 
-	mock.ExpectQuery(`SELECT request_id`).
+	mock.ExpectQuery(`FROM generation_results`).
 		WithArgs("req-2").
 		WillReturnRows(rows)
 
 	got, err := repo.Get(context.Background(), "req-2")
 	require.NoError(t, err)
 	require.Nil(t, got.Result)
+}
+
+func TestStartProcessing_PendingToProcessing(t *testing.T) {
+	t.Parallel()
+	repo, db, mock := newRepo(t)
+	defer db.Close()
+
+	mock.ExpectExec(`UPDATE generation_results`).
+		WithArgs("req-1", requests.StatusProcessing, requests.StatusPending).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	started, err := repo.StartProcessing(context.Background(), "req-1")
+	require.NoError(t, err)
+	require.True(t, started)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestStartProcessing_StatusConflict(t *testing.T) {
+	t.Parallel()
+	repo, db, mock := newRepo(t)
+	defer db.Close()
+
+	mock.ExpectExec(`UPDATE generation_results`).
+		WithArgs("req-1", requests.StatusProcessing, requests.StatusPending).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	started, err := repo.StartProcessing(context.Background(), "req-1")
+	require.NoError(t, err)
+	require.False(t, started)
+	require.NoError(t, mock.ExpectationsWereMet())
 }

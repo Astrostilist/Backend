@@ -111,7 +111,7 @@ func (h *RecommendHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		RequestID: requestID,
 		UserID:    req.UserID,
 		Scenario:  req.Scenario,
-		Status:    requests.StatusAccepted,
+		Status:    requests.StatusPending,
 	}); err != nil {
 		h.logger.Error("failed to create requests_log entry", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "failed to create request")

@@ -8,6 +8,7 @@ import (
 
 	almocks "astroapi/internal/alisa/mocks"
 	"astroapi/internal/handlers"
+	"astroapi/internal/requests"
 	reqmocks "astroapi/internal/requests/mocks"
 	rulemocks "astroapi/internal/ruleengine/mocks"
 	"astroapi/internal/user"
@@ -24,6 +25,12 @@ func TestProfileProcessor_HappyPath(t *testing.T) {
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
 
+	reqRepo.EXPECT().
+		Get(gomock.Any(), "req-1").
+		Return(requests.Request{RequestID: "req-1", Status: requests.StatusPending}, nil).Times(1)
+	reqRepo.EXPECT().
+		StartProcessing(gomock.Any(), "req-1").
+		Return(true, nil).Times(1)
 	userRepo.EXPECT().
 		Save(gomock.Any(), gomock.AssignableToTypeOf(user.User{})).
 		Return(nil).Times(1)
@@ -73,6 +80,12 @@ func TestProfileProcessor_SaveFailureMarksRequestFailed(t *testing.T) {
 	reqRepo := reqmocks.NewMockRepository(ctrl)
 
 	saveErr := errors.New("db down")
+	reqRepo.EXPECT().
+		Get(gomock.Any(), "req-1").
+		Return(requests.Request{RequestID: "req-1", Status: requests.StatusPending}, nil).Times(1)
+	reqRepo.EXPECT().
+		StartProcessing(gomock.Any(), "req-1").
+		Return(true, nil).Times(1)
 	userRepo.EXPECT().Save(gomock.Any(), gomock.Any()).Return(saveErr).Times(1)
 	reqRepo.EXPECT().
 		UpdateStatus(gomock.Any(), "req-1", "failed", gomock.Nil(), gomock.Any()).
@@ -99,6 +112,13 @@ func TestRecommendProcessor_HappyPath(t *testing.T) {
 	rulesRepo := rulemocks.NewMockRepository(ctrl)
 	ai := almocks.NewMockGenerator(ctrl)
 
+	reqRepo.EXPECT().
+		Get(gomock.Any(), "req-2").
+		Return(requests.Request{RequestID: "req-2", Status: requests.StatusPending}, nil).Times(1)
+	reqRepo.EXPECT().
+		StartProcessing(gomock.Any(), "req-2").
+		Return(true, nil).Times(1)
+
 	userRepo.EXPECT().Get(gomock.Any(), validUserID).
 		Return(user.User{UserID: validUserID, BirthDate: "1990-01-01"}, nil).Times(1)
 	rulesRepo.EXPECT().Match(gomock.Any(), gomock.Any()).Return([]string{"luxury"}, nil).Times(1)
@@ -115,6 +135,53 @@ func TestRecommendProcessor_HappyPath(t *testing.T) {
 			"user_id":  validUserID,
 			"scenario": "personal_style",
 			"context":  map[string]any{"triggers": []string{"Полнолуние"}},
+		},
+	})
+	require.NoError(t, p.Handle(context.Background(), payload))
+}
+
+func TestRecommendProcessor_DuplicateCompletedIsSkipped(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+	userRepo := usermocks.NewMockRepository(ctrl)
+	reqRepo := reqmocks.NewMockRepository(ctrl)
+	rulesRepo := rulemocks.NewMockRepository(ctrl)
+	ai := almocks.NewMockGenerator(ctrl)
+
+	reqRepo.EXPECT().
+		Get(gomock.Any(), "req-dup").
+		Return(requests.Request{RequestID: "req-dup", Status: requests.StatusCompleted}, nil).Times(1)
+
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, zap.NewNop())
+	payload, _ := json.Marshal(map[string]any{
+		"request_id": "req-dup",
+		"recommend": map[string]any{
+			"user_id":  validUserID,
+			"scenario": "personal_style",
+			"context":  map[string]any{"triggers": []string{"Полнолуние"}},
+		},
+	})
+	require.NoError(t, p.Handle(context.Background(), payload))
+}
+
+func TestRecommendProcessor_ProcessingRequestIsNotCompleted(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+	userRepo := usermocks.NewMockRepository(ctrl)
+	reqRepo := reqmocks.NewMockRepository(ctrl)
+	rulesRepo := rulemocks.NewMockRepository(ctrl)
+	ai := almocks.NewMockGenerator(ctrl)
+
+	reqRepo.EXPECT().
+		Get(gomock.Any(), "req-processing").
+		Return(requests.Request{RequestID: "req-processing", Status: requests.StatusProcessing}, nil).Times(1)
+
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, zap.NewNop())
+	payload, _ := json.Marshal(map[string]any{
+		"request_id": "req-processing",
+		"recommend": map[string]any{
+			"user_id":  validUserID,
+			"scenario": "personal_style",
 		},
 	})
 	require.NoError(t, p.Handle(context.Background(), payload))

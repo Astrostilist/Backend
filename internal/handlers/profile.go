@@ -31,7 +31,7 @@ type ProfileRequest struct {
 }
 
 // ProfileHandler обрабатывает POST /api/v1/astro/profile.
-// Действия: валидация → создать запись в requests_log (status=accepted) →
+// Действия: валидация → создать запись в requests_log (status=pending) →
 // Сохраняем данный либо в БД, либо в memcached →
 // опубликовать событие в JetStream → вернуть 202 с request_id.
 type ProfileHandler struct {
@@ -106,7 +106,7 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		RequestID: requestID,
 		UserID:    req.UserID,
 		Scenario:  profileScenarioName,
-		Status:    requests.StatusAccepted,
+		Status:    requests.StatusPending,
 	}); err != nil {
 		h.logger.Error("failed to create requests_log entry", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "failed to create request")
