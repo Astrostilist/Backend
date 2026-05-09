@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"astroapi/config"
+	"astroapi/internal/admin"
 	"astroapi/internal/alisa"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
@@ -114,6 +115,7 @@ func run() error {
 	requestsRepo := requests.NewPostgresRepository(db.DB)
 	rulesRepo := rules.NewPostgresRepository(db.DB)
 	productsRepo := products.NewPostgresRepository(db.DB)
+	adminRepo := admin.NewPostgresRepository(db.DB)
 
 	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
@@ -174,6 +176,7 @@ func run() error {
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
+	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
 
 	dlqreader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqreader, zapLogger)
@@ -189,6 +192,7 @@ func run() error {
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
 	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
+	r.Post("/api/v1/auth/login", authHandler.Login)
 	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
