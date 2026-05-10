@@ -115,13 +115,13 @@ infra-down: ## stop local infra
 infra-logs: ## tail local infra logs
 	docker compose -f $(INFRA_COMPOSE) logs -f
 
-dev-up: ## start local infra and app with hot-reload (air)
+dev-up: ## start local infra AND app with hot-reload (air)
 	docker compose -f $(DEV_COMPOSE) up -d --build
 
 dev-down: ## stop local environment
 	docker compose -f $(DEV_COMPOSE) down
 
-dev-logs: ## tail local environment logs
+dev-logs: ## tail logs 
 	docker compose -f $(DEV_COMPOSE) logs -f
 
 dev-restart: ## rebuild and restart only the app
