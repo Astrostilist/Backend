@@ -40,7 +40,7 @@ sequenceDiagram
     Worker->>NATS: Ack Message
 ```
 
-**Ключевые изменения:**
+**Ключевые моменты:**
 *   **DB:** Таблица `users`.
 *   **NATS:** Используется стрим `astro.events` (или отдельный `astro.profiles`).
 *   **Response:** Мгновенный `202 Accepted`.
