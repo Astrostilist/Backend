@@ -23,9 +23,10 @@ GOOSE_VERSION         := v3.22.0
         test test-race test-integration cover \
         lint mocks mocks-clean generate \
         docker-build docker-up docker-down \
-        local-up local-down local-logs \
+        infra-up infra-down infra-logs \
+        dev-up dev-down dev-logs dev-restart \
         migrate-up migrate-down migrate-status \
-        generate-key
+        init-superadmin generate-key
 
 .DEFAULT_GOAL := help
 
@@ -137,6 +138,9 @@ migrate-down: ## rollback the last migration
 
 migrate-status: ## show migration status
 	goose -dir migrations postgres "$${DB_DSN}" status
+
+init-superadmin: ## create first SuperAdmin from SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD
+	go run ./cmd/superadmin
 
 # ---- helpers --------------------------------------------------------
 generate-key: ## generate ENCRYPTION_KEY (base64, 32 bytes) and write to $(ENV_FILE)
