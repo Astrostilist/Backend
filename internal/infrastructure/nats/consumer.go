@@ -15,7 +15,7 @@ type MessageConsumer struct {
 	sm *JetStreamAdapter
 }
 
-func NewMessageConsumer(js *JetStreamAdapter, logger *zap.Logger) *MessageConsumer {
+func NewMessageConsumer(js *JetStreamAdapter) *MessageConsumer {
 	return &MessageConsumer{sm: js}
 }
 

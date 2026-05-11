@@ -83,12 +83,6 @@ func TestProfileHandler_ValidationAndErrors(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name:           "method not allowed",
-			method:         http.MethodGet,
-			payload:        "",
-			expectedStatus: http.StatusMethodNotAllowed,
-		},
-		{
 			name:           "body too large",
 			method:         http.MethodPost,
 			payload:        string(make([]byte, (1<<20)+1)),

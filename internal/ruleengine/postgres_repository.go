@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 var (
@@ -15,15 +16,16 @@ var (
 )
 
 type PostgresRepository struct {
-	db *sql.DB
+	db     *sql.DB
+	logger *zap.Logger
 }
 
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func NewPostgresRepository(db *sql.DB) *PostgresRepository {
-	return &PostgresRepository{db: db}
+func NewPostgresRepository(db *sql.DB, logger *zap.Logger) *PostgresRepository {
+	return &PostgresRepository{db: db, logger: logger}
 }
 
 func (r *PostgresRepository) List(ctx context.Context, options ListOptions) (ListResult, error) {
@@ -55,7 +57,7 @@ func (r *PostgresRepository) List(ctx context.Context, options ListOptions) (Lis
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("failed to close astro rules rows: %v", closeErr)
+			r.logger.Warn("failed to close astro rules rows", zap.Error(closeErr))
 		}
 	}()
 

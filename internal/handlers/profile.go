@@ -54,11 +54,6 @@ func NewProfileHandler(publisher MsgPublisher, requestsRepo requests.Repository,
 }
 
 func (h *ProfileHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
 	r.Body = http.MaxBytesReader(w, r.Body, profileMaxBodyBytes)
 
 	var req ProfileRequest

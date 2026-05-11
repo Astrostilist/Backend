@@ -103,12 +103,12 @@ func run() error {
 	}
 	initCancel()
 
-	publisher := natsinfra.NewMessagePublisher(jsAdapter, zapLogger)
+	publisher := natsinfra.NewMessagePublisher(jsAdapter)
 
 	// 3. Repositories
 	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
 	requestsRepo := requests.NewPostgresRepository(db.DB)
-	rulesRepo := rules.NewPostgresRepository(db.DB)
+	rulesRepo := rules.NewPostgresRepository(db.DB, zapLogger)
 
 	// 4. AI client
 	aiClient := alisa.NewClient(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL)
@@ -121,7 +121,7 @@ func run() error {
 	msgRouter.Register(models.MsgProfileSubj, profileProcessor)
 	msgRouter.Register(models.MsgRecommendSubj, recommendProcessor)
 
-	consumer := natsinfra.NewMessageConsumer(jsAdapter, zapLogger)
+	consumer := natsinfra.NewMessageConsumer(jsAdapter)
 
 	var wg sync.WaitGroup
 	wg.Add(2)

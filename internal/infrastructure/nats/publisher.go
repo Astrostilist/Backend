@@ -5,17 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
 	"time"
-
-	"go.uber.org/zap"
 )
 
 type MessagePublisher struct {
 	sm *JetStreamAdapter
 }
 
-func NewMessagePublisher(js *JetStreamAdapter, logger *zap.Logger) *MessagePublisher {
+func NewMessagePublisher(js *JetStreamAdapter) *MessagePublisher {
 	return &MessagePublisher{sm: js}
 }
 

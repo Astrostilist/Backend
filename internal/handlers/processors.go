@@ -106,19 +106,24 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 		return fmt.Errorf("validation: %v", errs)
 	}
 
-	if err := p.userRepo.Save(ctx, user.User{
-		UserID:       msg.Profile.UserID,
-		BirthDate:    msg.Profile.BirthDate,
-		ConsentGiven: msg.Profile.ConsentGiven,
-	}); err != nil {
-		p.markFailed(ctx, msg.RequestID, err)
-		return err
+	// consent_given=false: дата рождения не сохраняется в БД (GDPR / ФЗ-152).
+	if msg.Profile.ConsentGiven {
+		if err := p.userRepo.Save(ctx, user.User{
+			UserID:       msg.Profile.UserID,
+			BirthDate:    msg.Profile.BirthDate,
+			ConsentGiven: msg.Profile.ConsentGiven,
+		}); err != nil {
+			p.markFailed(ctx, msg.RequestID, err)
+			return err
+		}
+		p.logger.Info("profile saved", zap.String("request_id", msg.RequestID), zap.String("user_id", msg.Profile.UserID))
+	} else {
+		p.logger.Info("profile skipped: no consent", zap.String("request_id", msg.RequestID), zap.String("user_id", msg.Profile.UserID))
 	}
 
 	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, nil, ""); err != nil {
 		p.logger.Warn("failed to mark profile request as completed", zap.Error(err))
 	}
-	p.logger.Info("profile saved", zap.String("request_id", msg.RequestID), zap.String("user_id", msg.Profile.UserID))
 	return nil
 }
 

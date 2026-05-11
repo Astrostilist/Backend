@@ -1,32 +1,162 @@
 openapi: 3.0.3
 info:
-  title: Astro Backend API
-  version: 0.1.0
+  title: AI-Астростилист Backend API
+  description: Backend API для Telegram-бота. Профиль пользователя, генерация рекомендаций, каталог товаров и правила маппинга.
+  version: 2.0.0
+
+servers:
+  - url: https://api.astrostylist.example.com
+    description: Production
+  - url: http://localhost:8080
+    description: Local
+
+security:
+  - botAuth: []
+
 paths:
+
+  # ─── Health ────────────────────────────────────────────────────────────────
+
   /api/v1/:
     get:
-      summary: Service health endpoint
+      summary: Health check
+      tags: [System]
+      security: []
       responses:
         "200":
-          description: API and database status payload
+          description: Статус сервиса и БД
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Envelope"
+
+  # ─── Client API ────────────────────────────────────────────────────────────
+
+  /api/v1/astro/profile:
+    post:
+      summary: Сохранить профиль пользователя
+      description: |
+        Принимает дату рождения, шифрует AES-256-GCM и сохраняет в БД.
+        Если consent_given=false — данные НЕ сохраняются (живут только в памяти на время сессии).
+        Обработка асинхронная через NATS.
+      tags: [Client API]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileRequest"
+            example:
+              user_id: "123e4567-e89b-12d3-a456-426614174000"
+              birth_date: "1990-05-15"
+              birth_place: "Moscow"
+              consent_given: true
+      responses:
+        "202":
+          description: Профиль принят в обработку
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/astro/recommend:
+    post:
+      summary: Запросить рекомендации
+      description: |
+        Инициирует генерацию персональных рекомендаций.
+
+        **async mode (default):** возвращает 202 + request_id. Результат доставляется POST-ом на webhook_url бота.
+
+        **sync mode:** удерживает соединение до готовности. Timeout: 5 секунд.
+      tags: [Client API]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecommendRequest"
+            example:
+              user_id: "123e4567-e89b-12d3-a456-426614174000"
+              scenario: "personal_style"
+              context:
+                triggers: ["Венера в Тельце", "Полнолуние"]
+                gender: "female"
+                occasion: "work"
+              mode: "async"
+      responses:
+        "200":
+          description: Результат готов (sync mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecommendSyncEnvelope"
+        "202":
+          description: Принято в обработку (async mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Пользователь не найден
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "504":
+          description: Timeout AI-сервиса (sync mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+
+  /api/v1/feedback:
+    post:
+      summary: Оставить обратную связь
+      description: Сохраняет оценку рекомендации для улучшения промптов.
+      tags: [Client API]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackRequest"
+      responses:
+        "200":
+          description: Feedback сохранён
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: request_id не найден
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+
+  # ─── Admin API ─────────────────────────────────────────────────────────────
+
   /api/v1/admin/rules:
     get:
-      summary: List astro rules
+      summary: Список правил маппинга
+      tags: [Admin — Rules]
       security:
-        - bearerAuth: []
+        - adminAuth: []
       parameters:
         - name: is_active
           in: query
-          required: false
           schema:
             type: boolean
         - name: limit
           in: query
-          required: false
           schema:
             type: integer
             default: 50
@@ -34,33 +164,42 @@ paths:
             maximum: 200
         - name: offset
           in: query
-          required: false
           schema:
             type: integer
             default: 0
             minimum: 0
       responses:
         "200":
-          description: Paginated astro rules list
+          description: Список правил с пагинацией
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminRulesListEnvelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
     post:
-      summary: Create an astro rule
+      summary: Создать правило маппинга
+      tags: [Admin — Rules]
       security:
-        - bearerAuth: []
+        - adminAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/AdminRulePayload"
+            example:
+              name: "Венера в Тельце"
+              astro_condition:
+                planet: "Venus"
+                sign: "Taurus"
+              product_tags: ["luxury", "comfort", "classic"]
+              priority: 10
+              is_active: true
       responses:
         "201":
-          description: Astro rule created
+          description: Правило создано
           content:
             application/json:
               schema:
@@ -69,11 +208,13 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/ValidationError"
+
   /api/v1/admin/rules/{id}:
     put:
-      summary: Update an astro rule
+      summary: Обновить правило
+      tags: [Admin — Rules]
       security:
-        - bearerAuth: []
+        - adminAuth: []
       parameters:
         - name: id
           in: path
@@ -89,7 +230,7 @@ paths:
               $ref: "#/components/schemas/AdminRulePayload"
       responses:
         "200":
-          description: Astro rule updated
+          description: Правило обновлено
           content:
             application/json:
               schema:
@@ -100,10 +241,12 @@ paths:
           $ref: "#/components/responses/NotFound"
         "422":
           $ref: "#/components/responses/ValidationError"
+
     delete:
-      summary: Soft delete an astro rule by deactivating it
+      summary: Деактивировать правило (soft delete)
+      tags: [Admin — Rules]
       security:
-        - bearerAuth: []
+        - adminAuth: []
       parameters:
         - name: id
           in: path
@@ -113,7 +256,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: Astro rule deactivated
+          description: Правило деактивировано
           content:
             application/json:
               schema:
@@ -122,31 +265,221 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/v1/admin/products:
+    get:
+      summary: Список товаров каталога
+      tags: [Admin — Catalog]
+      security:
+        - adminAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+        - name: tag
+          in: query
+          description: Фильтр по тегу
+          schema:
+            type: string
+        - name: search
+          in: query
+          description: Полнотекстовый поиск по названию
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Список товаров
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProductsListEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/admin/catalog/import:
+    post:
+      summary: Импорт каталога из CSV
+      description: |
+        Загружает и обновляет каталог товаров через CSV-файл.
+
+        Ожидаемая структура CSV:
+        ```
+        product_id,title,price,url,images,tags
+        PROD-123,"Красная куртка",15990.00,"https://...","https://cdn.../img1.jpg","red,leather,sport"
+        ```
+      tags: [Admin — Catalog]
+      security:
+        - adminAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                update_strategy:
+                  type: string
+                  enum: [replace, merge]
+                  default: merge
+      responses:
+        "200":
+          description: Результат импорта
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogImportResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/admin/catalog/sync:
+    post:
+      summary: Запустить синхронизацию с RetailCRM вручную
+      tags: [Admin — Catalog]
+      security:
+        - adminAuth: []
+      responses:
+        "202":
+          description: Синхронизация запущена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/admin/logs:
+    get:
+      summary: Лог генераций (requests_log)
+      tags: [Admin — Monitoring]
+      security:
+        - adminAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [accepted, processing, completed, failed]
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        "200":
+          description: Лог запросов с пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLogsListEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/admin/requests/{id}:
+    get:
+      summary: Статус конкретного запроса (polling)
+      description: Используется ботом для polling результата в sync-подобном сценарии.
+      tags: [Admin — Monitoring]
+      security:
+        - adminAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Данные запроса
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestLogEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+# ─── Components ──────────────────────────────────────────────────────────────
+
 components:
+
   securitySchemes:
-    bearerAuth:
+    botAuth:
       type: http
       scheme: bearer
+      description: Bearer-токен для Telegram-бота
+    adminAuth:
+      type: http
+      scheme: bearer
+      description: ADMIN_TOKEN из переменных окружения
+
   responses:
+    BadRequest:
+      description: Ошибка валидации запроса
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Envelope"
     Unauthorized:
-      description: Missing or invalid admin token
+      description: Отсутствует или невалидный токен
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Envelope"
     NotFound:
-      description: Resource not found
+      description: Ресурс не найден
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Envelope"
     ValidationError:
-      description: Request validation failed
+      description: Ошибка бизнес-валидации
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Envelope"
+    InternalError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Envelope"
+
   schemas:
+
     Envelope:
       type: object
       properties:
@@ -156,17 +489,103 @@ components:
           type: string
         data:
           nullable: true
+
+    AcceptedEnvelope:
+      type: object
+      properties:
+        request_id:
+          type: string
+          format: uuid
+
+    # ─── Client ───────────────────────────────────────────────────────────────
+
+    ProfileRequest:
+      type: object
+      required: [user_id, birth_date, consent_given]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        birth_date:
+          type: string
+          format: date
+          example: "1990-05-15"
+        birth_time:
+          type: string
+          example: "14:30"
+        birth_place:
+          type: string
+          example: "Moscow"
+        consent_given:
+          type: boolean
+
+    RecommendRequest:
+      type: object
+      required: [user_id, scenario]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        scenario:
+          type: string
+          enum: [personal_style, perfect_gift]
+        context:
+          type: object
+          additionalProperties: true
+          description: |
+            Дополнительный контекст. Поддерживаемые ключи:
+            - triggers (array of string) — астро-триггеры для Rule-Engine
+            - gender (string)
+            - occasion (string)
+            - budget_range (string)
+        mode:
+          type: string
+          enum: [async, sync]
+          default: async
+
+    RecommendSyncEnvelope:
+      type: object
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        result:
+          type: string
+          description: Сгенерированный AI-текст
+        tags:
+          type: array
+          items:
+            type: string
+
+    FeedbackRequest:
+      type: object
+      required: [request_id, rating]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        rating:
+          type: string
+          enum: [positive, negative, neutral]
+        comment:
+          type: string
+          maxLength: 1000
+
+    # ─── Admin Rules ──────────────────────────────────────────────────────────
+
     AdminRulePayload:
       type: object
-      required:
-        - name
-        - astro_condition
+      required: [name, astro_condition]
       properties:
         name:
           type: string
+          maxLength: 255
         astro_condition:
           type: object
           additionalProperties: true
+          description: Пример — {"planet":"Venus","sign":"Taurus"}
         product_tags:
           type: array
           items:
@@ -178,17 +597,10 @@ components:
         is_active:
           type: boolean
           default: true
+
     AdminRule:
       type: object
-      required:
-        - id
-        - name
-        - astro_condition
-        - product_tags
-        - priority
-        - is_active
-        - created_at
-        - updated_at
+      required: [id, name, astro_condition, product_tags, priority, is_active, created_at, updated_at]
       properties:
         id:
           type: string
@@ -204,7 +616,6 @@ components:
             type: string
         priority:
           type: integer
-          minimum: 0
         is_active:
           type: boolean
         created_at:
@@ -213,6 +624,7 @@ components:
         updated_at:
           type: string
           format: date-time
+
     AdminRuleEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -220,6 +632,7 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/AdminRule"
+
     AdminRulesListEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -237,4 +650,133 @@ components:
                 offset:
                   type: integer
                 total_count:
+                  type: integer
+
+    # ─── Admin Catalog ────────────────────────────────────────────────────────
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        ext_product_id:
+          type: string
+        title:
+          type: string
+        price:
+          type: number
+          format: double
+        url:
+          type: string
+          format: uri
+        images:
+          type: array
+          items:
+            type: string
+            format: uri
+        tags:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AdminProductsListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Product"
+                total:
+                  type: integer
+                page:
+                  type: integer
+                limit:
+                  type: integer
+
+    CatalogImportResult:
+      type: object
+      properties:
+        imported:
+          type: integer
+        updated:
+          type: integer
+        errors:
+          type: integer
+        error_details:
+          type: array
+          items:
+            type: object
+            properties:
+              row:
+                type: integer
+              reason:
+                type: string
+
+    # ─── Admin Logs ───────────────────────────────────────────────────────────
+
+    RequestLog:
+      type: object
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+        scenario:
+          type: string
+        status:
+          type: string
+          enum: [accepted, processing, completed, failed]
+        attempt_count:
+          type: integer
+        error_reason:
+          type: string
+          nullable: true
+        result_payload:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RequestLogEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/RequestLog"
+
+    AdminLogsListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/RequestLog"
+                total:
+                  type: integer
+                page:
+                  type: integer
+                limit:
                   type: integer
