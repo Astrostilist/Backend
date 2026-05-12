@@ -173,7 +173,8 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 			handler.HandleProfile(rr, req)
 
 			if rr.Code != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, tt.expectedStatus)
+				t.Errorf("handler returned wrong status code: got %v want %v, testname: %s",
+					rr.Code, tt.expectedStatus, tt.name)
 			}
 		})
 	}

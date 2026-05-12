@@ -74,6 +74,11 @@ func NewProfileHandler(
 }
 
 func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, profileMaxBodyBytes)
 
 	var req ProfileRequest

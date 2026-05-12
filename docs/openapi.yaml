@@ -254,32 +254,6 @@ paths:
       summary: Обновить правило
       tags: [Admin — Rules]
       security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Paginated astro rules list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AdminRulesSingleEnvelope"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalServerErr"
-
-    put:
-      summary: Обновить правило
-      tags: [Admin — Rules]
-      security:
         - adminAuth: []
       parameters:
         - name: id
@@ -395,6 +369,7 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
   /api/v1/admin/products/{sku}:
     get:
       summary: Get product by SKU
@@ -574,110 +549,6 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-  /api/v1/admin/products:
-    get:
-      summary: List products
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: category
-          in: query
-          required: false
-          schema:
-            type: string
-        - name: tags
-          in: query
-          required: false
-          style: form
-          explode: false
-          schema:
-            type: array
-            items:
-              type: string
-        - name: page
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 1
-            minimum: 1
-        - name: page_size
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 50
-            minimum: 1
-            maximum: 200
-      responses:
-        "200":
-          description: Paginated products list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AdminProductsListEnvelope"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-  /api/v1/admin/products/{sku}:
-    get:
-      summary: Get product by SKU
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: sku
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Product card
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AdminProductEnvelope"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    patch:
-      summary: Partially update product tags and price
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: sku
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AdminProductPatchPayload"
-      responses:
-        "200":
-          description: Product updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AdminProductEnvelope"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "422":
-          $ref: "#/components/responses/ValidationError"
-
-
-
-
-
 
 
 # ─── Components ──────────────────────────────────────────────────────────────
@@ -1007,6 +878,7 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/AdminProduct"
+              
     AdminProductsListEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"
@@ -1055,25 +927,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
-    AdminProductsListEnvelope:
-      allOf:
-        - $ref: "#/components/schemas/Envelope"
-        - type: object
-          properties:
-            data:
-              type: object
-              properties:
-                items:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/Product"
-                total:
-                  type: integer
-                page:
-                  type: integer
-                limit:
-                  type: integer
 
     CatalogImportResult:
       type: object
