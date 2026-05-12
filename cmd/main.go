@@ -113,13 +113,13 @@ func run() error {
 	}
 	initCancel()
 
-	publisher := natsinfra.NewMessagePublisher(jsAdapter, zapLogger)
+	publisher := natsinfra.NewMessagePublisher(jsAdapter)
 
-	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
-	requestsRepo := requests.NewPostgresRepository(db.DB)
-	rulesRepo := rules.NewPostgresRepository(db.DB)
-	productsRepo := products.NewPostgresRepository(db.DB)
-	adminRepo := admin.NewPostgresRepository(db.DB)
+    userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
+    requestsRepo := requests.NewPostgresRepository(db.DB)
+    rulesRepo := rules.NewPostgresRepository(db.DB, zapLogger)
+    productsRepo := products.NewPostgresRepository(db.DB)
+    adminRepo := admin.NewPostgresRepository(db.DB)
 
 	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
@@ -135,7 +135,7 @@ func run() error {
 	msgRouter.Register(models.MsgProfileSubj, profileProcessor)
 	msgRouter.Register(models.MsgRecommendSubj, recommendProcessor)
 
-	consumer := natsinfra.NewMessageConsumer(jsAdapter, zapLogger)
+	consumer := natsinfra.NewMessageConsumer(jsAdapter)
 
 	var wg sync.WaitGroup
 
