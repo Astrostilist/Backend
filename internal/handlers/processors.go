@@ -85,8 +85,48 @@ func triggersFromContext(ctx map[string]any) ([]string, bool) {
 	return triggers, true
 }
 
+func beginRequestProcessing(
+	ctx context.Context,
+	repo requests.Repository,
+	logger *zap.Logger,
+	requestID string,
+) (bool, error) {
+	req, err := repo.Get(ctx, requestID)
+	if err != nil {
+		return false, err
+	}
+	if req.Status == requests.StatusCompleted {
+		logger.Info("skipping duplicate request_id", zap.String("request_id", requestID))
+		return false, nil
+	}
+	if req.Status != requests.StatusPending {
+		logger.Debug("request is not pending, skip processing",
+			zap.String("request_id", requestID), zap.String("status", req.Status))
+		return false, nil
+	}
+
+	started, err := repo.StartProcessing(ctx, requestID)
+	if err != nil {
+		return false, err
+	}
+	if !started {
+		current, getErr := repo.Get(ctx, requestID)
+		if getErr != nil {
+			return false, getErr
+		}
+		if current.Status == requests.StatusCompleted {
+			logger.Info("skipping duplicate request_id", zap.String("request_id", requestID))
+			return false, nil
+		}
+		logger.Debug("request was locked by another worker",
+			zap.String("request_id", requestID), zap.String("status", current.Status))
+		return false, nil
+	}
+	return true, nil
+}
+
 // ProfileProcessor обрабатывает сообщения astro.events.profile.
-// Сохраняет пользователя (с шифрованием birth_date) и обновляет requests_log.
+// Сохраняет пользователя (с шифрованием birth_date) и обновляет generation_results.
 type ProfileProcessor struct {
 	userRepo     user.Repository
 	requestsRepo requests.Repository
@@ -104,6 +144,14 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 	}
 	if errs := msg.Profile.Validate(); len(errs) > 0 {
 		return fmt.Errorf("validation: %v", errs)
+	}
+
+	shouldProcess, err := beginRequestProcessing(ctx, p.requestsRepo, p.logger, msg.RequestID)
+	if err != nil {
+		return err
+	}
+	if !shouldProcess {
+		return nil
 	}
 
 	// consent_given=false: дата рождения не сохраняется в БД (GDPR / ФЗ-152).
@@ -134,7 +182,7 @@ func (p *ProfileProcessor) markFailed(ctx context.Context, requestID string, err
 }
 
 // RecommendProcessor обрабатывает сообщения astro.events.recommend.
-// Строит рекомендацию через AlisaAI и пишет результат в requests_log.
+// Строит рекомендацию через AlisaAI и пишет результат в generation_results.
 type RecommendProcessor struct {
 	userRepo     user.Repository
 	requestsRepo requests.Repository
@@ -163,6 +211,14 @@ func (p *RecommendProcessor) Handle(ctx context.Context, payload []byte) error {
 	var msg recommendPayload
 	if err := json.Unmarshal(payload, &msg); err != nil {
 		return fmt.Errorf("validation: invalid recommend payload: %w", err)
+	}
+
+	shouldProcess, err := beginRequestProcessing(ctx, p.requestsRepo, p.logger, msg.RequestID)
+	if err != nil {
+		return err
+	}
+	if !shouldProcess {
+		return nil
 	}
 
 	result, err := buildRecommendation(ctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient)

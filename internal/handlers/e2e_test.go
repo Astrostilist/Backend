@@ -17,6 +17,8 @@ import (
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
+	"astroapi/internal/usecases"
+	"astroapi/internal/usecases/repositories/domain"
 	"astroapi/internal/user"
 
 	"github.com/nats-io/nats-server/v2/server"
@@ -67,6 +69,21 @@ func (m *memRequestsRepo) Create(_ context.Context, r requests.Request) error {
 	return nil
 }
 
+func (m *memRequestsRepo) StartProcessing(_ context.Context, id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.items[id]
+	if !ok {
+		return false, requests.ErrNotFound
+	}
+	if r.Status != requests.StatusPending {
+		return false, nil
+	}
+	r.Status = requests.StatusProcessing
+	m.items[id] = r
+	return true, nil
+}
+
 func (m *memRequestsRepo) UpdateStatus(_ context.Context, id, status string, result []byte, reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -107,6 +124,38 @@ type stubAI struct{ reply string }
 
 func (s stubAI) Generate(context.Context, string) (string, error) { return s.reply, nil }
 
+type memPersonalDataRepo struct {
+	mu    sync.Mutex
+	items map[string]domain.PersonalData
+}
+
+func newMemPersonalDataRepo() *memPersonalDataRepo {
+	return &memPersonalDataRepo{items: map[string]domain.PersonalData{}}
+}
+
+func (m *memPersonalDataRepo) Save(_ context.Context, data domain.PersonalData) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.items[data.UserID] = data
+	return nil
+}
+
+type memPersonalDataCache struct {
+	mu    sync.Mutex
+	items map[string]domain.PersonalData
+}
+
+func newMemPersonalDataCache() *memPersonalDataCache {
+	return &memPersonalDataCache{items: map[string]domain.PersonalData{}}
+}
+
+func (m *memPersonalDataCache) Save(_ context.Context, data domain.PersonalData) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.items[data.UserID] = data
+	return nil
+}
+
 // ---- embedded NATS --------------------------------------------------
 
 func startNATS(t *testing.T) (host, port string) {
@@ -133,7 +182,7 @@ func startNATS(t *testing.T) (host, port string) {
 // ---- e2e ------------------------------------------------------------
 
 // TestE2E_ProfilePipeline: HTTP POST /astro/profile → NATS → ProfileProcessor
-// сохраняет пользователя и апдейтит requests_log в статус completed.
+// сохраняет пользователя и апдейтит результат генерации в статус completed.
 func TestE2E_ProfilePipeline(t *testing.T) {
 	host, port := startNATS(t)
 
@@ -154,6 +203,9 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	publisher := natsinfra.NewMessagePublisher(adapter)
 	userRepo := newMemUserRepo()
 	reqRepo := newMemRequestsRepo()
+	personalDataRepo := newMemPersonalDataRepo()
+	personalDataCache := newMemPersonalDataCache()
+	personalDataUC := usecases.NewProcessPersonalDataUseCase(personalDataRepo, personalDataCache)
 
 	profileProc := handlers.NewProfileProcessor(userRepo, reqRepo, logger)
 	router := handlers.NewMsgRouter(logger)
@@ -165,8 +217,7 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 			return router.Dispatch(c, msg.Subject(), msg.Data())
 		}))
 
-	h := handlers.NewProfileHandler(publisher, reqRepo, logger)
-
+	h := handlers.NewProfileHandler(publisher, reqRepo, personalDataUC, logger)
 	body := []byte(`{
 		"user_id":"123e4567-e89b-12d3-a456-426614174000",
 		"birth_date":"1990-01-01",
@@ -175,7 +226,7 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/profile", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
-	h.Handle(rr, req)
+	h.HandleProfile(rr, req)
 	require.Equal(t, http.StatusAccepted, rr.Code)
 
 	var resp map[string]string
@@ -195,7 +246,7 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 }
 
 // TestE2E_RecommendPipeline: async POST /astro/recommend → NATS → RecommendProcessor
-// вызывает AI, пишет completed в requests_log.
+// вызывает AI, пишет completed в результат генерации.
 func TestE2E_RecommendPipeline(t *testing.T) {
 	host, port := startNATS(t)
 

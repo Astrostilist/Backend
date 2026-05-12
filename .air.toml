@@ -1,0 +1,23 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/main ./cmd"
+  bin = "./tmp/main"
+  full_bin = "./tmp/main"
+  
+  # Отслеживаемые расширения файлов
+  include_ext = ["go"]
+  
+  # Исключенные директории
+  exclude_dir = ["tmp", ".github", ".vscode", "docs", "docker", "migrations", "prometheus"]
+  
+  # Отслеживаемые директории
+  include_dir = ["cmd", "config", "internal"] 
+
+  poll = true 
+  poll_interval = 5000 # Проверка каждые 5с
+  
+[log]
+  time = true
+  main_only = false # false, чтобы видеть ВСЕ логи air, включая ошибки

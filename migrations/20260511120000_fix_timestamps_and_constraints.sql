@@ -1,9 +1,10 @@
 -- +goose Up
 
 -- Переводим все TIMESTAMP → TIMESTAMPTZ для корректной работы с таймзонами
+-- если колонок нет, добавляем
 ALTER TABLE products
-    ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC',
-    ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at AT TIME ZONE 'UTC';
+    ADD COLUMN created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 ALTER TABLE astro_rules
     ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC',

@@ -13,6 +13,7 @@ type Config struct {
 	// App
 	LogServiceName string
 	LogLevel       string
+	Environment    string
 	AdminToken     string
 	EncryptionKey  string
 
@@ -35,9 +36,12 @@ type Config struct {
 	NATSPort string
 
 	// AI
-	AIBaseURL  string
-	AIAPIKey   string
-	AIModelURL string
+	AIBaseURL   string
+	AIAPIKey    string
+	AIModelURL  string
+	AstroAPIURL string
+
+	MemcachedHost string
 }
 
 // Load читает переменные окружения. .env-файл подхватывается один раз здесь,
@@ -50,6 +54,7 @@ func Load() *Config {
 	return &Config{
 		LogServiceName: getEnv("LOG_SERVICE_NAME", "astro-backend"),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		Environment:    getEnv("ENVIRONMENT", "dev"),
 
 		AdminToken:    getEnv("ADMIN_TOKEN", ""),
 		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
@@ -69,9 +74,12 @@ func Load() *Config {
 		NATSHost: getEnv("NATS_HOST", "localhost"),
 		NATSPort: getEnv("NATS_PORT", "4222"),
 
-		AIBaseURL:  getEnv("AI_BASE_URL", "https://ai.api.cloud.yandex.net/v1"),
-		AIAPIKey:   getEnv("AI_API_KEY", ""),
-		AIModelURL: getEnv("AI_MODEL_URL", ""),
+		AIBaseURL:   getEnv("AI_BASE_URL", "https://ai.api.cloud.yandex.net/v1"),
+		AIAPIKey:    getEnv("AI_API_KEY", ""),
+		AIModelURL:  getEnv("AI_MODEL_URL", ""),
+		AstroAPIURL: getEnv("ASTRO_API_URL", ""),
+
+		MemcachedHost: getEnv("MEMCACHED_HOST", ""),
 	}
 }
 

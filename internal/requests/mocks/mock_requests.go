@@ -70,6 +70,21 @@ func (mr *MockRepositoryMockRecorder) Get(ctx, requestID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockRepository)(nil).Get), ctx, requestID)
 }
 
+// StartProcessing mocks base method.
+func (m *MockRepository) StartProcessing(ctx context.Context, requestID string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StartProcessing", ctx, requestID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// StartProcessing indicates an expected call of StartProcessing.
+func (mr *MockRepositoryMockRecorder) StartProcessing(ctx, requestID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StartProcessing", reflect.TypeOf((*MockRepository)(nil).StartProcessing), ctx, requestID)
+}
+
 // UpdateStatus mocks base method.
 func (m *MockRepository) UpdateStatus(ctx context.Context, requestID, status string, result []byte, errReason string) error {
 	m.ctrl.T.Helper()

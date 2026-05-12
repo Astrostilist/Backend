@@ -10,6 +10,11 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"astroapi/internal/circutebreaker"
+	"astroapi/internal/resilience"
+
+	"go.uber.org/zap"
 )
 
 //go:generate mockgen -source=client.go -destination=mocks/mock_alisa.go -package=mocks
@@ -31,6 +36,15 @@ type Client struct {
 	modelURL   string
 	httpClient *http.Client
 	maxRetries int
+	breaker    *resilience.CircuitBreaker
+}
+
+type ClientOptions struct {
+	HTTPClient *http.Client
+	MaxRetries int
+	Logger     *zap.Logger
+	Metrics    *circutebreaker.Registry
+	Breaker    *resilience.CircuitBreaker
 }
 
 type ChatCompletionRequest struct {
@@ -65,14 +79,37 @@ type ChatCompletionResponse struct {
 }
 
 func NewClient(baseURL, apiKey, modelURL string) *Client {
+	return NewClientWithOptions(baseURL, apiKey, modelURL, ClientOptions{MaxRetries: defaultMaxRetries})
+}
+
+func NewClientWithOptions(baseURL, apiKey, modelURL string, opts ClientOptions) *Client {
+	httpClient := opts.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: defaultTimeout}
+	}
+
+	maxRetries := opts.MaxRetries
+	if maxRetries < 0 {
+		maxRetries = defaultMaxRetries
+	}
+
+	logger := opts.Logger
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	breaker := opts.Breaker
+	if breaker == nil {
+		breaker = resilience.NewCircuitBreaker("alisa_ai", 5, 30*time.Second, logger, opts.Metrics)
+	}
+
 	return &Client{
-		baseURL:  strings.TrimRight(baseURL, "/"),
-		apiKey:   apiKey,
-		modelURL: modelURL,
-		httpClient: &http.Client{
-			Timeout: defaultTimeout,
-		},
-		maxRetries: defaultMaxRetries,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		apiKey:     apiKey,
+		modelURL:   modelURL,
+		httpClient: httpClient,
+		maxRetries: maxRetries,
+		breaker:    breaker,
 	}
 }
 
@@ -103,11 +140,18 @@ func (c *Client) doRequest(ctx context.Context, requestBody ChatCompletionReques
 	var err error
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
-		responseText, err = c.send(ctx, requestBody)
+		err = c.breaker.Execute(func() error {
+			var sendErr error
+			responseText, sendErr = c.send(ctx, requestBody)
+			return sendErr
+		})
 		if err == nil {
 			return responseText, nil
 		}
 
+		if resilience.IsServiceUnavailable(err) {
+			return "", err
+		}
 		if !isRetryableError(err) || attempt == c.maxRetries {
 			return "", err
 		}

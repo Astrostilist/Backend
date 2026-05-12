@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS products (
     ext_product_id VARCHAR(255) NOT NULL UNIQUE,
     title VARCHAR(500) NOT NULL,
     price NUMERIC(10,2) NOT NULL,
+    category TEXT NOT NULL DEFAULT '',
     url TEXT NOT NULL,
     images TEXT[] NOT NULL DEFAULT '{}',
     tags JSONB NOT NULL DEFAULT '[]'::jsonb,
