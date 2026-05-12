@@ -200,7 +200,7 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	adapter := natsinfra.NewJetStreamRepository(js, logger)
 	require.NoError(t, adapter.InitializeStreams(ctx))
 
-	publisher := natsinfra.NewMessagePublisher(adapter, logger)
+	publisher := natsinfra.NewMessagePublisher(adapter)
 	userRepo := newMemUserRepo()
 	reqRepo := newMemRequestsRepo()
 	personalDataRepo := newMemPersonalDataRepo()
@@ -211,7 +211,7 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	router := handlers.NewMsgRouter(logger)
 	router.Register(models.MsgProfileSubj, profileProc)
 
-	consumer := natsinfra.NewMessageConsumer(adapter, logger)
+	consumer := natsinfra.NewMessageConsumer(adapter)
 	require.NoError(t, consumer.ConsumeWithHandler(ctx, models.MsgStreamEvents, models.MsgProfileWrk,
 		func(c context.Context, msg jetstream.Msg) error {
 			return router.Dispatch(c, msg.Subject(), msg.Data())
@@ -264,7 +264,7 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 	adapter := natsinfra.NewJetStreamRepository(js, logger)
 	require.NoError(t, adapter.InitializeStreams(ctx))
 
-	publisher := natsinfra.NewMessagePublisher(adapter, logger)
+	publisher := natsinfra.NewMessagePublisher(adapter)
 	userRepo := newMemUserRepo()
 	require.NoError(t, userRepo.Save(ctx, user.User{
 		UserID:       validUserID,
@@ -280,7 +280,7 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 	router := handlers.NewMsgRouter(logger)
 	router.Register(models.MsgRecommendSubj, proc)
 
-	consumer := natsinfra.NewMessageConsumer(adapter, logger)
+	consumer := natsinfra.NewMessageConsumer(adapter)
 	require.NoError(t, consumer.ConsumeWithHandler(ctx, models.MsgStreamEvents, models.MsgRecommendWrk,
 		func(c context.Context, msg jetstream.Msg) error {
 			return router.Dispatch(c, msg.Subject(), msg.Data())

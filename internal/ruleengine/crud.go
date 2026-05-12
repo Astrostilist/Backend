@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"regexp"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 var (
@@ -21,15 +21,16 @@ var (
 )
 
 type PostgresRepository struct {
-	db *sql.DB
+	db     *sql.DB
+	logger *zap.Logger
 }
 
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func NewPostgresRepository(db *sql.DB) *PostgresRepository {
-	return &PostgresRepository{db: db}
+func NewPostgresRepository(db *sql.DB, logger *zap.Logger) *PostgresRepository {
+	return &PostgresRepository{db: db, logger: logger}
 }
 
 // Create - создание правила в БД.
@@ -223,7 +224,7 @@ func (r *PostgresRepository) List(ctx context.Context, options ListOptions) ([]*
 	defer func() {
 		err = rows.Close()
 		if err != nil {
-			log.Printf("failed to rows close: %v", err)
+			r.logger.Error("failed to rows close", zap.Error(err))
 		}
 	}()
 

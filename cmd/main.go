@@ -77,6 +77,7 @@ func run() error {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 
+	// 1. Database
 	db, err := database.New(rootCtx, cfg)
 	if err != nil {
 		return err
@@ -89,6 +90,7 @@ func run() error {
 
 	runMigrations(db, zapLogger)
 
+	// 2. NATS + JetStream
 	natsConn, err := natsinfra.InitNATS(rootCtx, zapLogger, cfg)
 	if err != nil {
 		return err
@@ -109,21 +111,23 @@ func run() error {
 	}
 	initCancel()
 
-	publisher := natsinfra.NewMessagePublisher(jsAdapter, zapLogger)
+	publisher := natsinfra.NewMessagePublisher(jsAdapter)
 
+	// 3. Repositories
 	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
 	requestsRepo := requests.NewPostgresRepository(db.DB)
-	rulesRepo := rules.NewPostgresRepository(db.DB)
+	rulesRepo := rules.NewPostgresRepository(db.DB, zapLogger)
 	productsRepo := products.NewPostgresRepository(db.DB)
 	adminRepo := admin.NewPostgresRepository(db.DB)
 
 	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
-
+	// 4. AI client
 	aiClient := alisa.NewClientWithOptions(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL,
 		alisa.ClientOptions{MaxRetries: 3})
 
+	// 5. Message router + processors (consumers)
 	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, zapLogger)
 	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, zapLogger)
 
@@ -131,7 +135,7 @@ func run() error {
 	msgRouter.Register(models.MsgProfileSubj, profileProcessor)
 	msgRouter.Register(models.MsgRecommendSubj, recommendProcessor)
 
-	consumer := natsinfra.NewMessageConsumer(jsAdapter, zapLogger)
+	consumer := natsinfra.NewMessageConsumer(jsAdapter)
 
 	var wg sync.WaitGroup
 

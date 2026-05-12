@@ -3,6 +3,7 @@
 package ruleengine
 
 import (
+	"astroapi/internal/logger"
 	"context"
 	"database/sql"
 	"log"
@@ -94,7 +95,11 @@ func TestMatch(t *testing.T) {
 			log.Printf("failed to close db: %v", err)
 		}
 	}()
-	r := PostgresRepository{db}
+	zapLogger, err := logger.NewLogger("test", "debug")
+	if err != nil {
+		return
+	}
+	r := PostgresRepository{db, zapLogger}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	for _, tt := range tests {
