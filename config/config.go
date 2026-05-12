@@ -42,6 +42,9 @@ type Config struct {
 	AstroAPIURL string
 
 	MemcachedHost string
+
+	JaegerEndpoint    string
+	JaegerServiceName string
 }
 
 // Load читает переменные окружения. .env-файл подхватывается один раз здесь,
@@ -71,6 +74,11 @@ func Load() *Config {
 		DBMaxConnLifetime: getEnvAsDuration("DB_MAX_CONN_LIFETIME", time.Hour),
 		DBMaxConnIdleTime: getEnvAsDuration("DB_MAX_CONN_IDLE_TIME", 30*time.Minute),
 
+		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
+		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
+
+		MemcachedHost: getEnv("MEMCACHED_HOST", "localhost:11211"),
+
 		NATSHost: getEnv("NATS_HOST", "localhost"),
 		NATSPort: getEnv("NATS_PORT", "4222"),
 
@@ -78,8 +86,6 @@ func Load() *Config {
 		AIAPIKey:    getEnv("AI_API_KEY", ""),
 		AIModelURL:  getEnv("AI_MODEL_URL", ""),
 		AstroAPIURL: getEnv("ASTRO_API_URL", ""),
-
-		MemcachedHost: getEnv("MEMCACHED_HOST", ""),
 	}
 }
 
