@@ -135,6 +135,14 @@ func (c *Client) Generate(ctx context.Context, prompt string) (string, error) {
 	return responseText, nil
 }
 
+func (c *Client) Ping(ctx context.Context) error {
+	state := c.breaker.CurrentState()
+	if state == resilience.StateClosed {
+		return nil
+	}
+	return fmt.Errorf("circuit breaker state: %d", state)
+}
+
 func (c *Client) doRequest(ctx context.Context, requestBody ChatCompletionRequest) (string, error) {
 	var responseText string
 	var err error

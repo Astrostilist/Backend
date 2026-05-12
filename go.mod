@@ -8,7 +8,13 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.12.3
 	github.com/nats-io/nats.go v1.50.0
+	github.com/stretchr/testify v1.11.1
+	github.com/testcontainers/testcontainers-go v0.42.0
+	github.com/testcontainers/testcontainers-go/modules/nats v0.41.0
+	github.com/testcontainers/testcontainers-go/modules/postgres v0.41.0
+	go.opentelemetry.io/otel/trace v1.43.0
 	go.uber.org/mock v0.6.0
+	go.uber.org/zap v1.27.1
 )
 
 require (
@@ -26,12 +32,6 @@ require (
 	github.com/pressly/goose v2.7.0+incompatible
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/prometheus/client_golang v1.23.2
-	github.com/stretchr/testify v1.11.1
-	github.com/testcontainers/testcontainers-go v0.42.0
-	github.com/testcontainers/testcontainers-go/modules/nats v0.41.0
-	github.com/testcontainers/testcontainers-go/modules/postgres v0.41.0
-	go.opentelemetry.io/otel/trace v1.43.0
-	go.uber.org/zap v1.27.1
 	gotest.tools v2.2.0+incompatible
 )
 
