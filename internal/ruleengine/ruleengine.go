@@ -3,9 +3,9 @@ package ruleengine
 import (
 	"context"
 	"encoding/json"
-	"log"
 
 	"github.com/lib/pq"
+	"go.uber.org/zap"
 )
 
 // Match - возвращает уникальный список тегов по активным правилам, отсортированным по priority ASC
@@ -32,7 +32,7 @@ func (r *PostgresRepository) Match(ctx context.Context, triggers []string) ([]st
 	}
 	defer func() {
 		if err = rows.Close(); err != nil {
-			log.Printf("failed to close rows: %v", err)
+			r.logger.Warn("failed to close match rows", zap.Error(err))
 		}
 	}()
 

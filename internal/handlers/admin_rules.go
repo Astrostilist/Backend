@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode"
 
 	rules "astroapi/internal/ruleengine"
 
@@ -212,10 +213,7 @@ func (r adminRuleRequest) toRuleInput() (rules.RuleInput, error) {
 		return rules.RuleInput{}, errors.New("priority must be greater than or equal to 0")
 	}
 
-	productTags := r.ProductTags
-	if productTags == nil {
-		productTags = []string{}
-	}
+	productTags := normalizeTags(r.ProductTags)
 
 	isActive := true
 	if r.IsActive != nil {
@@ -267,4 +265,22 @@ func parseRulesListOptions(r *http.Request) (rules.ListOptions, error) {
 		Limit:    limit,
 		Offset:   offset,
 	}, nil
+}
+
+// normalizeTags приводит теги к lowercase, убирает пробелы и дубли.
+// Гарантирует совпадение тегов из правил с тегами товаров из RetailCRM.
+func normalizeTags(tags []string) []string {
+	seen := make(map[string]struct{}, len(tags))
+	result := make([]string, 0, len(tags))
+	for _, t := range tags {
+		t = strings.TrimFunc(strings.ToLower(t), unicode.IsSpace)
+		if t == "" {
+			continue
+		}
+		if _, ok := seen[t]; !ok {
+			seen[t] = struct{}{}
+			result = append(result, t)
+		}
+	}
+	return result
 }

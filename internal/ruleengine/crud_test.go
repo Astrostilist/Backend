@@ -3,6 +3,7 @@
 package ruleengine
 
 import (
+	"astroapi/internal/logger"
 	"context"
 	"database/sql"
 	"log"
@@ -94,8 +95,11 @@ func TestCreate(t *testing.T) {
 
 	err = goose.Up(db, "../../migrations")
 	require.NoError(t, err)
-
-	rules := PostgresRepository{db}
+	zapLogger, err := logger.NewLogger("test", "debug")
+	if err != nil {
+		return
+	}
+	rules := PostgresRepository{db, zapLogger}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			createdID, err := rules.Create(ctx, &tt.input)
@@ -220,7 +224,11 @@ func TestUpdate(t *testing.T) {
 	err = goose.Up(db, "../../migrations")
 	require.NoError(t, err)
 
-	rules := PostgresRepository{db}
+	zapLogger, err := logger.NewLogger("test", "debug")
+	if err != nil {
+		return
+	}
+	rules := PostgresRepository{db, zapLogger}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			createdID, err := rules.Create(ctx, &tt.input)
@@ -423,7 +431,11 @@ func TestList(t *testing.T) {
 	err = goose.Up(db, "../../migrations")
 	require.NoError(t, err)
 
-	rules := PostgresRepository{db}
+	zapLogger, err := logger.NewLogger("test", "debug")
+	if err != nil {
+		return
+	}
+	rules := PostgresRepository{db, zapLogger}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var listID []uuid.UUID
@@ -526,7 +538,11 @@ func TestDeactivate(t *testing.T) {
 	err = goose.Up(db, "../../migrations")
 	require.NoError(t, err)
 
-	rules := PostgresRepository{db}
+	zapLogger, err := logger.NewLogger("test", "debug")
+	if err != nil {
+		return
+	}
+	rules := PostgresRepository{db, zapLogger}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			createdID, err := rules.Create(ctx, &tt.input)
@@ -623,7 +639,11 @@ func TestDelete(t *testing.T) {
 	err = goose.Up(db, "../../migrations")
 	require.NoError(t, err)
 
-	rules := PostgresRepository{db}
+	zapLogger, err := logger.NewLogger("test", "debug")
+	if err != nil {
+		return
+	}
+	rules := PostgresRepository{db, zapLogger}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			createdID, err := rules.Create(ctx, &tt.input)
@@ -761,7 +781,11 @@ func TestCreateAndMatch(t *testing.T) {
 	err = goose.Up(db, "../../migrations")
 	require.NoError(t, err)
 
-	rules := PostgresRepository{db}
+	zapLogger, err := logger.NewLogger("test", "debug")
+	if err != nil {
+		return
+	}
+	rules := PostgresRepository{db, zapLogger}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var ids []uuid.UUID

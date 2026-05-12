@@ -76,7 +76,7 @@ func bootstrapPipeline(t *testing.T) (*natsinfra.JetStreamAdapter, *natsinfra.Me
 	adapter := natsinfra.NewJetStreamRepository(js, logger)
 	require.NoError(t, adapter.InitializeStreams(ctx))
 
-	return adapter, natsinfra.NewMessagePublisher(adapter, logger), conn.Conn
+	return adapter, natsinfra.NewMessagePublisher(adapter), conn.Conn
 }
 
 // TestPipeline_PublishFlatSubject_ReachesConsumer — TDD regression test
@@ -91,7 +91,7 @@ func TestPipeline_PublishFlatSubject_ReachesConsumer(t *testing.T) {
 	var received atomic.Int32
 	done := make(chan []byte, 1)
 
-	consumer := natsinfra.NewMessageConsumer(adapter, zap.NewNop())
+	consumer := natsinfra.NewMessageConsumer(adapter)
 	err := consumer.ConsumeWithHandler(ctx, models.MsgStreamEvents, models.MsgProfileWrk,
 		func(_ context.Context, msg jetstream.Msg) error {
 			if received.Add(1) == 1 {
@@ -122,7 +122,7 @@ func TestPipeline_RecommendFlatSubject_ReachesConsumer(t *testing.T) {
 	defer cancel()
 
 	done := make(chan struct{}, 1)
-	consumer := natsinfra.NewMessageConsumer(adapter, zap.NewNop())
+	consumer := natsinfra.NewMessageConsumer(adapter)
 	require.NoError(t, consumer.ConsumeWithHandler(ctx, models.MsgStreamEvents, models.MsgRecommendWrk,
 		func(_ context.Context, _ jetstream.Msg) error {
 			done <- struct{}{}
