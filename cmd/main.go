@@ -17,6 +17,8 @@ import (
 	"astroapi/internal/alisa"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
+	infra "astroapi/internal/infrastructure"
+	health "astroapi/internal/infrastructure/health"
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/logger"
 	"astroapi/internal/metrics"
@@ -123,6 +125,10 @@ func run() error {
 	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
+
+	healthRepo := health.NewHealthServiceRepo(db, natsConn)
+	monitor := infra.NewMonitorService(jsAdapter, healthRepo, zapLogger)
+
 	// 4. AI client
 	aiClient := alisa.NewClientWithOptions(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL,
 		alisa.ClientOptions{MaxRetries: 3})
@@ -171,11 +177,12 @@ func run() error {
 
 	wg.Go(func() {
 		defer wg.Done()
-		natsinfra.StartLagMonitor(rootCtx, jsAdapter)
+		monitor.StartInfraMonitor(rootCtx)
 		<-rootCtx.Done()
 	})
 
 	helloHandler := handlers.NewHelloHandler(handlers.NewRealHelloService(db))
+	healthHandler := handlers.NewHealthHandler(healthRepo)
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
@@ -207,6 +214,7 @@ func run() error {
 	})
 	// Observability Routes
 	r.Handle("/metrics", metrics.NewHandler())
+	r.Get("/api/v1/health", healthHandler.HandleHealth)
 
 	srv := &http.Server{
 		Addr:         ":8080",
