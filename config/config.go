@@ -14,8 +14,14 @@ type Config struct {
 	LogServiceName string
 	LogLevel       string
 	Environment    string
-	AdminToken     string
-	EncryptionKey  string
+
+	AdminToken    string
+	EncryptionKey string
+
+	MemcachedHost string
+
+	JaegerEndpoint    string
+	JaegerServiceName string
 
 	// Database
 	DBHost     string
@@ -40,11 +46,6 @@ type Config struct {
 	AIAPIKey    string
 	AIModelURL  string
 	AstroAPIURL string
-
-	MemcachedHost string
-
-	JaegerEndpoint    string
-	JaegerServiceName string
 }
 
 // Load читает переменные окружения. .env-файл подхватывается один раз здесь,
@@ -56,11 +57,16 @@ func Load() *Config {
 
 	return &Config{
 		LogServiceName: getEnv("LOG_SERVICE_NAME", "astro-backend"),
-		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		LogLevel:       getEnv("LOG_LEVEL", "INFO"),
 		Environment:    getEnv("ENVIRONMENT", "dev"),
 
 		AdminToken:    getEnv("ADMIN_TOKEN", ""),
 		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
+
+		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
+		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
+
+		MemcachedHost: getEnv("MEMCACHED_HOST", "localhost:11211"),
 
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnv("DB_PORT", "5432"),
@@ -73,11 +79,6 @@ func Load() *Config {
 		DBMinConns:        getEnvAsInt32("DB_MIN_CONNS", 20),
 		DBMaxConnLifetime: getEnvAsDuration("DB_MAX_CONN_LIFETIME", time.Hour),
 		DBMaxConnIdleTime: getEnvAsDuration("DB_MAX_CONN_IDLE_TIME", 30*time.Minute),
-
-		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
-		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
-
-		MemcachedHost: getEnv("MEMCACHED_HOST", "localhost:11211"),
 
 		NATSHost: getEnv("NATS_HOST", "localhost"),
 		NATSPort: getEnv("NATS_PORT", "4222"),
