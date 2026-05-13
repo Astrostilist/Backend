@@ -1,7 +1,6 @@
 package resilience
 
 import (
-	"astroapi/internal/metrics"
 	"errors"
 	"fmt"
 	"sync"
@@ -31,9 +30,11 @@ func (e *ServiceUnavailableError) Error() string {
 	if e == nil {
 		return "service unavailable"
 	}
+
 	if e.Cause != nil {
 		return fmt.Sprintf("service %s unavailable: %v", e.Service, e.Cause)
 	}
+
 	return fmt.Sprintf("service %s unavailable", e.Service)
 }
 
@@ -41,14 +42,17 @@ func (e *ServiceUnavailableError) Unwrap() error {
 	if e == nil {
 		return nil
 	}
+
 	if e.Cause != nil {
 		return e.Cause
 	}
+
 	return ErrCircuitBreakerOpen
 }
 
 func IsServiceUnavailable(err error) bool {
 	var serviceErr *ServiceUnavailableError
+
 	return errors.As(err, &serviceErr) || errors.Is(err, ErrCircuitBreakerOpen)
 }
 
@@ -70,16 +74,25 @@ type CircuitBreaker struct {
 	openedAt            time.Time
 }
 
-func NewCircuitBreaker(serviceName string, failureThreshold int, halfOpenTimeout time.Duration, logger *zap.Logger, reporter StateReporter) *CircuitBreaker {
+func NewCircuitBreaker(
+	serviceName string,
+	failureThreshold int,
+	halfOpenTimeout time.Duration,
+	logger *zap.Logger,
+	reporter StateReporter,
+) *CircuitBreaker {
 	if failureThreshold <= 0 {
 		failureThreshold = 5
 	}
+
 	if halfOpenTimeout <= 0 {
 		halfOpenTimeout = 30 * time.Second
 	}
+
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+
 	cb := &CircuitBreaker{
 		serviceName:      serviceName,
 		failureThreshold: failureThreshold,
@@ -89,7 +102,9 @@ func NewCircuitBreaker(serviceName string, failureThreshold int, halfOpenTimeout
 		now:              time.Now,
 		state:            StateClosed,
 	}
+
 	cb.reportStateLocked(StateClosed)
+
 	return cb
 }
 
@@ -100,6 +115,7 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 
 	err := fn()
 	cb.afterRequest(err)
+
 	return err
 }
 
@@ -108,11 +124,15 @@ func (cb *CircuitBreaker) beforeRequest() error {
 	defer cb.mu.Unlock()
 
 	now := cb.now()
+
 	if cb.state == StateOpen {
 		if now.Sub(cb.openedAt) >= cb.halfOpenTimeout {
 			cb.transitionLocked(StateHalfOpen, "half-open timeout elapsed")
 		} else {
-			return &ServiceUnavailableError{Service: cb.serviceName, Cause: ErrCircuitBreakerOpen}
+			return &ServiceUnavailableError{
+				Service: cb.serviceName,
+				Cause:   ErrCircuitBreakerOpen,
+			}
 		}
 	}
 
@@ -125,18 +145,22 @@ func (cb *CircuitBreaker) afterRequest(err error) {
 
 	if err == nil {
 		cb.consecutiveFailures = 0
+
 		if cb.state != StateClosed {
 			cb.transitionLocked(StateClosed, "request succeeded")
 		} else {
 			cb.reportStateLocked(StateClosed)
 		}
+
 		return
 	}
 
 	cb.consecutiveFailures++
+
 	if cb.state == StateHalfOpen || cb.consecutiveFailures >= cb.failureThreshold {
 		cb.openedAt = cb.now()
 		cb.transitionLocked(StateOpen, "failure threshold reached")
+
 		return
 	}
 
@@ -150,16 +174,20 @@ func (cb *CircuitBreaker) CurrentState() int {
 	if cb.state == StateOpen && cb.now().Sub(cb.openedAt) >= cb.halfOpenTimeout {
 		return StateHalfOpen
 	}
+
 	return cb.state
 }
 
 func (cb *CircuitBreaker) transitionLocked(newState int, reason string) {
 	previous := cb.state
 	cb.state = newState
+
 	if newState != StateOpen {
 		cb.openedAt = time.Time{}
 	}
+
 	cb.reportStateLocked(newState)
+
 	cb.logger.Info(
 		"circuit breaker state changed",
 		zap.String("service", cb.serviceName),
@@ -170,7 +198,11 @@ func (cb *CircuitBreaker) transitionLocked(newState int, reason string) {
 }
 
 func (cb *CircuitBreaker) reportStateLocked(state int) {
-	metrics.SetCircuitBreakerState(cb.serviceName, state)
+	if cb.reporter == nil {
+		return
+	}
+
+	cb.reporter.SetCircuitBreakerState(cb.serviceName, state)
 }
 
 func stateName(state int) string {
