@@ -19,6 +19,7 @@ const commandTimeout = 15 * time.Second
 func main() {
 	if err := run(); err != nil {
 		log.Printf("superadmin init failed: %v", err)
+		os.Exit(1)
 	}
 }
 
