@@ -1,10 +1,11 @@
 package metrics
 
 import (
-	"astroapi/config"
+	"errors"
 	"net/http"
 	"sync"
-	"errors"
+
+	"astroapi/config"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -18,12 +19,19 @@ var (
 
 	// Histogram metrics
 	httpRequestDuration *prometheus.HistogramVec
+
 	// Gauge metrics
 	natsConsumerLag     *prometheus.GaugeVec
 	circuitBreakerState *prometheus.GaugeVec
 
 	initOnce sync.Once
 )
+
+type CircuitBreakerReporter struct{}
+
+func (CircuitBreakerReporter) SetCircuitBreakerState(service string, state int) {
+	SetCircuitBreakerState(service, state)
+}
 
 func Initialize(cfg *config.Config) {
 	initOnce.Do(func() {
@@ -34,7 +42,7 @@ func Initialize(cfg *config.Config) {
 func initializeMetrics(cfg *config.Config) {
 	registry = prometheus.NewRegistry()
 
-	// init Global lables
+	// init Global labels
 	staticLabels := prometheus.Labels{
 		"environment": cfg.Environment,
 		"instance":    cfg.LogServiceName,
@@ -46,7 +54,8 @@ func initializeMetrics(cfg *config.Config) {
 			Name: "dlq_messages_total",
 			Help: "DLQ messages total",
 		},
-		[]string{"instance", "environment"})
+		[]string{"instance", "environment"},
+	)
 	dlqMessagesTotal = rawDlqMessagesTotal.MustCurryWith(staticLabels)
 
 	// init Histogram metrics
@@ -65,7 +74,9 @@ func initializeMetrics(cfg *config.Config) {
 		prometheus.GaugeOpts{
 			Name: "nats_consumer_lag",
 			Help: "NATS consumer lag",
-		}, []string{"instance", "environment", "stream", "consumer"})
+		},
+		[]string{"instance", "environment", "stream", "consumer"},
+	)
 	natsConsumerLag = rawNatsConsumerLag.MustCurryWith(staticLabels)
 
 	// 0=closed, 1=open, 2=half-open
@@ -73,8 +84,9 @@ func initializeMetrics(cfg *config.Config) {
 		prometheus.GaugeOpts{
 			Name: "circuit_breaker_state",
 			Help: "Circuit Breaker state",
-		}, []string{"instance", "environment", "service"})
-
+		},
+		[]string{"instance", "environment", "service"},
+	)
 	circuitBreakerState = rawCircuitBreakerState.MustCurryWith(staticLabels)
 
 	// metrics register
@@ -82,7 +94,6 @@ func initializeMetrics(cfg *config.Config) {
 	safeRegister(rawHTTPRequestDuration)
 	safeRegister(rawNatsConsumerLag)
 	safeRegister(rawCircuitBreakerState)
-
 }
 
 func safeRegister(collector prometheus.Collector) {
