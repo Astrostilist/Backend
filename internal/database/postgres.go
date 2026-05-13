@@ -9,7 +9,7 @@ import (
 	"astroapi/config"
 
 	_ "github.com/lib/pq"
-	"github.com/pressly/goose"
+	"github.com/pressly/goose/v3"
 )
 
 const migrationsDir = "migrations"
@@ -42,6 +42,11 @@ func New(ctx context.Context, cfg *config.Config) (*PostgresDB, error) {
 	if err := db.PingContext(pingCtx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping postgres: %w", err)
+	}
+
+	if err := goose.SetDialect("postgres"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set goose dialect: %w", err)
 	}
 
 	if err := goose.Up(db, migrationsDir); err != nil {

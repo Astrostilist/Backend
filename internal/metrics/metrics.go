@@ -77,11 +77,19 @@ func initializeMetrics(cfg *config.Config) {
 	circuitBreakerState = rawCircuitBreakerState.MustCurryWith(staticLabels)
 
 	// metrics register
-	registry.MustRegister(rawDlqMessagesTotal)
-	registry.MustRegister(rawHTTPRequestDuration)
-	registry.MustRegister(rawNatsConsumerLag)
-	registry.MustRegister(rawCircuitBreakerState)
+	safeRegister(rawDlqMessagesTotal)
+	safeRegister(rawHTTPRequestDuration)
+	safeRegister(rawNatsConsumerLag)
+	safeRegister(rawCircuitBreakerState)
 
+}
+
+func safeRegister(collector prometheus.Collector) {
+	if err := registry.Register(collector); err != nil {
+		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+			panic(err)
+		}
+	}
 }
 
 func NewHandler() http.Handler {

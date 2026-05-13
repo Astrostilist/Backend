@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"astroapi/config"
-	"astroapi/internal/circutebreaker"
+	"astroapi/internal/resilience"
 	"astroapi/internal/metrics"
 	"astroapi/internal/resilience"
 
@@ -24,7 +24,7 @@ func TestAlisaCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 	metrics.Initialize(cfg)
 	core, observedLogs := observer.New(zap.InfoLevel)
 	logger := zap.New(core)
-	metricsRegistry := circutebreaker.NewRegistry()
+	metricsRegistry := resilience.NewRegistry()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestsCount.Add(1)
@@ -70,7 +70,7 @@ func TestAstroCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 
 	client := NewAstroAPIClient(server.URL, nil, logger, AstroAPIClientOptions{
 		HTTPClient: server.Client(),
-		Metrics:    circutebreaker.NewRegistry(),
+		Metrics:    resilience.NewRegistry(),
 	})
 
 	for i := 0; i < 5; i++ {

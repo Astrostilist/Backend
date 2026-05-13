@@ -3,10 +3,10 @@
 package integration
 
 import (
+	"os/exec"
 	"astroapi/internal/logger"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"testing"
 	"time"
@@ -30,12 +30,22 @@ type TestEnv struct {
 var testEnv *TestEnv
 
 func TestMain(m *testing.M) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		fmt.Fprintln(os.Stderr, "docker binary not available")
+		os.Exit(0)
+	}
+
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "docker daemon not available")
+		os.Exit(0)
+	}
+
 	ctx := context.Background()
 
 	// 0. Инициализируем логгер
 	logger, err := logger.NewLogger("integration_tests", "debug")
 	if err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+		panic(fmt.Sprintf("Failed to initialize logger: %v", err)
 	}
 	defer func() {
 		if err := logger.Sync(); err != nil {
@@ -46,7 +56,7 @@ func TestMain(m *testing.M) {
 	// 1. Инициализация окружения
 	env, err := setupIntegrationEnv(ctx)
 	if err != nil {
-		logger.Fatal("Failed to setup env", zap.Error(err))
+		logger.Fatal("Failed to setup env", zap.Error(err)))
 	}
 	testEnv = env
 
@@ -55,10 +65,10 @@ func TestMain(m *testing.M) {
 
 	// 3. Очистка (Terminate удаляет контейнеры)
 	if err := testEnv.Nats.Terminate(ctx); err != nil {
-		logger.Error("Failed to terminate Nats", zap.Error(err))
+		logger.Error("Failed to terminate Nats", zap.Error(err)))
 	}
 	if err := testEnv.Postgres.Terminate(ctx); err != nil {
-		logger.Error("Failed to terminate Postgres", zap.Error(err))
+		logger.Error("Failed to terminate Postgres", zap.Error(err)))
 	}
 
 	os.Exit(code)

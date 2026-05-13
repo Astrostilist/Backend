@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"astroapi/config"
-	"astroapi/internal/circutebreaker"
+	"astroapi/internal/resilience"
 	"astroapi/internal/resilience"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -74,7 +74,7 @@ type AstroAPIClientOptions struct {
 	HTTPClient  *http.Client
 	CacheBucket string
 	CacheTTL    time.Duration
-	Metrics     *circutebreaker.Registry
+	Metrics     *resilience.Registry
 	Breaker     *resilience.CircuitBreaker
 }
 

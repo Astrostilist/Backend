@@ -8,7 +8,7 @@ ENV_FILE      := .env
 INFRA_COMPOSE := docker-compose.infra.yaml
 DEV_COMPOSE   := docker-compose.dev.yaml
 PROD_COMPOSE  := docker-compose.yaml
-GOBIN         := $(shell go env GOPATH)/bin
+GOBIN         = $(shell GOTOOLCHAIN=local go env GOPATH)/bin
 
 # pinned tool versions
 MOCKGEN_VERSION       := v0.6.0
@@ -143,12 +143,10 @@ init-superadmin: ## create first SuperAdmin from SUPERADMIN_EMAIL/SUPERADMIN_PAS
 	go run ./cmd/superadmin
 
 # ---- helpers --------------------------------------------------------
-generate-key: ## generate ENCRYPTION_KEY (base64, 32 bytes) and write to $(ENV_FILE)
+generate-key: ## generate or replace ENCRYPTION_KEY (base64, 32 bytes) in $(ENV_FILE)
 	@if [[ ! -f $(ENV_FILE) ]]; then touch $(ENV_FILE); fi; \
-	if ! grep -q "^ENCRYPTION_KEY=" $(ENV_FILE); then \
-		KEY=$$(head -c 32 /dev/urandom | base64 | tr -d '\n'); \
-		printf "ENCRYPTION_KEY=%s\n" "$$KEY" >> $(ENV_FILE); \
-		echo "ENCRYPTION_KEY added to $(ENV_FILE)"; \
-	else \
-		echo "ENCRYPTION_KEY already exists in $(ENV_FILE)"; \
-	fi
+	KEY=$$(head -c 32 /dev/urandom | base64 | tr -d '\n'); \
+	TMP=$$(mktemp); \
+	awk -v key="ENCRYPTION_KEY=$$KEY" 'BEGIN { replaced=0 } /^ENCRYPTION_KEY=/ { if (!replaced) { print key; replaced=1 }; next } { print } END { if (!replaced) print key }' $(ENV_FILE) > $$TMP; \
+	mv $$TMP $(ENV_FILE); \
+	echo "ENCRYPTION_KEY generated in $(ENV_FILE)"

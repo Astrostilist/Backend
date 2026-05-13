@@ -170,7 +170,7 @@ func (cb *CircuitBreaker) transitionLocked(newState int, reason string) {
 }
 
 func (cb *CircuitBreaker) reportStateLocked(state int) {
-	metrics.SetCircuitBreakerState(AlisaServiceName, state)
+	metrics.SetCircuitBreakerState(cb.serviceName, state)
 }
 
 func stateName(state int) string {
