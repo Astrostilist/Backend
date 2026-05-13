@@ -49,6 +49,7 @@ const (
 func main() {
 	if err := run(); err != nil {
 		log.Printf("fatal: %v", err)
+		os.Exit(1)
 	}
 }
 
