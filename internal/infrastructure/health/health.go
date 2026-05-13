@@ -61,7 +61,7 @@ func (s *HealthServiceRepo) GetInfraStatus(ctx context.Context) (any, error) {
 			return nil, fmt.Errorf("internal error: cached state missing for known service %s", srvID)
 		}
 		resp[srvID] = state
-		if state.State == false || time.Since(state.Updated) > TTL {
+		if !state.State || time.Since(state.Updated) > TTL {
 			ok = false
 		}
 	}
