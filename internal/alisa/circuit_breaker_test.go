@@ -2,15 +2,14 @@ package alisa
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
-	"astroapi/config"
-	"astroapi/internal/resilience"
-	"astroapi/internal/metrics"
 	"astroapi/internal/resilience"
 
 	"github.com/stretchr/testify/require"
@@ -18,13 +17,46 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 )
 
+type testStateReporter struct {
+	states sync.Map
+}
+
+func (r *testStateReporter) SetCircuitBreakerState(service string, state int) {
+	r.states.Store(service, state)
+}
+
+func (r *testStateReporter) State(service string) (int, bool) {
+	value, ok := r.states.Load(service)
+	if !ok {
+		return 0, false
+	}
+
+	state, ok := value.(int)
+	return state, ok
+}
+
+func (r *testStateReporter) Render() string {
+	var builder strings.Builder
+
+	r.states.Range(func(service, state any) bool {
+		_, _ = fmt.Fprintf(
+			&builder,
+			"circuit_breaker_state{service=%q} %d\n",
+			service,
+			state,
+		)
+		return true
+	})
+
+	return builder.String()
+}
+
 func TestAlisaCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T) {
 	var requestsCount atomic.Int32
-	cfg := config.Load()
-	metrics.Initialize(cfg)
+
 	core, observedLogs := observer.New(zap.InfoLevel)
 	logger := zap.New(core)
-	metricsRegistry := resilience.NewRegistry()
+	metricsReporter := &testStateReporter{}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestsCount.Add(1)
@@ -36,7 +68,7 @@ func TestAlisaCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 	client := NewClientWithOptions(server.URL, "test-key", "gpt://folder/model/latest", ClientOptions{
 		HTTPClient: server.Client(),
 		Logger:     logger,
-		Metrics:    metricsRegistry,
+		Metrics:    metricsReporter,
 		MaxRetries: 0,
 	})
 
@@ -47,7 +79,11 @@ func TestAlisaCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 
 	countAfterOpen := requestsCount.Load()
 	require.Equal(t, int32(5), countAfterOpen)
-	require.Contains(t, metricsRegistry.Render(), `circuit_breaker_state`)
+	require.Contains(t, metricsReporter.Render(), `circuit_breaker_state{service="alisa_ai"}`)
+
+	state, ok := metricsReporter.State("alisa_ai")
+	require.True(t, ok)
+	require.Equal(t, resilience.StateOpen, state)
 
 	_, err := client.Generate(context.Background(), "test prompt")
 	require.Error(t, err)
@@ -58,8 +94,10 @@ func TestAlisaCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 
 func TestAstroCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T) {
 	var requestsCount atomic.Int32
+
 	core, observedLogs := observer.New(zap.InfoLevel)
 	logger := zap.New(core)
+	metricsReporter := &testStateReporter{}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestsCount.Add(1)
@@ -70,7 +108,7 @@ func TestAstroCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 
 	client := NewAstroAPIClient(server.URL, nil, logger, AstroAPIClientOptions{
 		HTTPClient: server.Client(),
-		Metrics:    resilience.NewRegistry(),
+		Metrics:    metricsReporter,
 	})
 
 	for i := 0; i < 5; i++ {
@@ -81,6 +119,10 @@ func TestAstroCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 	countAfterOpen := requestsCount.Load()
 	require.Equal(t, int32(5), countAfterOpen)
 
+	state, ok := metricsReporter.State("astro_api")
+	require.True(t, ok)
+	require.Equal(t, resilience.StateOpen, state)
+
 	_, err := client.GetAstroProfile("1992-06-26", "Moscow")
 	require.Error(t, err)
 	require.True(t, resilience.IsServiceUnavailable(err))
@@ -90,6 +132,7 @@ func TestAstroCircuitBreakerOpensAfterFiveFailuresAndStopsRequests(t *testing.T)
 
 func hasTransition(entries []observer.LoggedEntry, to string) bool {
 	found := false
+
 	for _, entry := range entries {
 		if entry.Message == "circuit breaker state changed" {
 			for _, field := range entry.Context {
@@ -99,5 +142,6 @@ func hasTransition(entries []observer.LoggedEntry, to string) bool {
 			}
 		}
 	}
+
 	return found
 }
