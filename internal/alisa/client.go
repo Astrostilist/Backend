@@ -42,7 +42,7 @@ type ClientOptions struct {
 	HTTPClient *http.Client
 	MaxRetries int
 	Logger     *zap.Logger
-	Metrics    *resilience.Registry
+	Metrics    resilience.StateReporter
 	Breaker    *resilience.CircuitBreaker
 }
 
