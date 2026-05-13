@@ -73,7 +73,7 @@ type AstroAPIClientOptions struct {
 	HTTPClient  *http.Client
 	CacheBucket string
 	CacheTTL    time.Duration
-	Metrics     *resilience.Registry
+	Metrics     resilience.StateReporter
 	Breaker     *resilience.CircuitBreaker
 }
 
