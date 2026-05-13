@@ -10,6 +10,7 @@ import (
 	"os"
 	"testing"
 	"time"
+	"log"
 
 	"github.com/testcontainers/testcontainers-go"
 	tc "github.com/testcontainers/testcontainers-go"
@@ -45,7 +46,7 @@ func TestMain(m *testing.M) {
 	// 0. Инициализируем логгер
 	logger, err := logger.NewLogger("integration_tests", "debug")
 	if err != nil {
-		panic(fmt.Sprintf("Failed to initialize logger: %v", err)
+		panic(fmt.Sprintf("Failed to initialize logger: %v", err))
 	}
 	defer func() {
 		if err := logger.Sync(); err != nil {
@@ -56,7 +57,7 @@ func TestMain(m *testing.M) {
 	// 1. Инициализация окружения
 	env, err := setupIntegrationEnv(ctx)
 	if err != nil {
-		logger.Fatal("Failed to setup env", zap.Error(err)))
+		logger.Fatal("Failed to setup env", zap.Error(err))
 	}
 	testEnv = env
 
@@ -65,10 +66,10 @@ func TestMain(m *testing.M) {
 
 	// 3. Очистка (Terminate удаляет контейнеры)
 	if err := testEnv.Nats.Terminate(ctx); err != nil {
-		logger.Error("Failed to terminate Nats", zap.Error(err)))
+		logger.Error("Failed to terminate Nats", zap.Error(err))
 	}
 	if err := testEnv.Postgres.Terminate(ctx); err != nil {
-		logger.Error("Failed to terminate Postgres", zap.Error(err)))
+		logger.Error("Failed to terminate Postgres", zap.Error(err))
 	}
 
 	os.Exit(code)
