@@ -57,7 +57,8 @@ func TestMain(m *testing.M) {
 	// 1. Инициализация окружения
 	env, err := setupIntegrationEnv(ctx)
 	if err != nil {
-		logger.Fatal("Failed to setup env", zap.Error(err))
+		fmt.Fprintf(os.Stderr, "Failed to setup env: %v\n", err)
+        os.Exit(1)
 	}
 	testEnv = env
 
