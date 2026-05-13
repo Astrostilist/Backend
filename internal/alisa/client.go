@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"astroapi/internal/resilience"
-	"astroapi/internal/resilience"
 
 	"go.uber.org/zap"
 )
