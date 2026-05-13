@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -9,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -64,6 +64,7 @@ func run() error {
 	if cfg.AdminToken == "" {
 		log.Println("warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
 	}
+
 	if cfg.BotAPIKey == "" {
 		log.Println("warning: BOT_API_KEY is not set, client endpoints will reject all requests")
 	}
@@ -72,12 +73,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		if syncErr := zapLogger.Sync(); syncErr != nil {
 			log.Printf("failed to sync logger: %v", syncErr)
 		}
 	}()
+
 	metrics.Initialize(cfg)
+	metricsReporter := metrics.CircuitBreakerReporter{}
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
@@ -86,6 +90,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		if closeErr := db.Close(); closeErr != nil {
 			zapLogger.Error("failed to close database", zap.Error(closeErr))
@@ -96,6 +101,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
 	defer natsConn.DrainNATS()
 
 	js, err := jetstream.New(natsConn.Conn)
@@ -114,18 +120,26 @@ func run() error {
 
 	publisher := natsinfra.NewMessagePublisher(jsAdapter)
 
-    userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
-    requestsRepo := requests.NewPostgresRepository(db.DB)
-    rulesRepo := rules.NewPostgresRepository(db.DB, zapLogger)
-    productsRepo := products.NewPostgresRepository(db.DB)
-    adminRepo := admin.NewPostgresRepository(db.DB)
+	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
+	requestsRepo := requests.NewPostgresRepository(db.DB)
+	rulesRepo := rules.NewPostgresRepository(db.DB, zapLogger)
+	productsRepo := products.NewPostgresRepository(db.DB)
+	adminRepo := admin.NewPostgresRepository(db.DB)
 
 	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 
-	aiClient := alisa.NewClientWithOptions(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL,
-		alisa.ClientOptions{MaxRetries: 3})
+	aiClient := alisa.NewClientWithOptions(
+		cfg.AIBaseURL,
+		cfg.AIAPIKey,
+		cfg.AIModelURL,
+		alisa.ClientOptions{
+			Logger:     zapLogger,
+			Metrics:    metricsReporter,
+			MaxRetries: 3,
+		},
+	)
 
 	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, zapLogger)
 	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, zapLogger)
@@ -149,6 +163,7 @@ func run() error {
 		); consumeErr != nil {
 			zapLogger.Error("profile worker failed", zap.Error(consumeErr))
 		}
+
 		<-rootCtx.Done()
 	})
 
@@ -163,6 +178,7 @@ func run() error {
 		); consumeErr != nil {
 			zapLogger.Error("recommend worker failed", zap.Error(consumeErr))
 		}
+
 		<-rootCtx.Done()
 	})
 
@@ -179,18 +195,17 @@ func run() error {
 	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
 	feedbackHandler := handlers.NewFeedbackHandler(feedbackrepo.NewFeedbackRepository(db.DB))
 
-	dlqreader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
-	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqreader, zapLogger)
+	dlqReader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
+	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqReader, zapLogger)
 
-	// Настраиваем роутер chi и middleware (единый блок)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(astromidware.RequestMetricsMiddleware())
 	r.Use(astromidware.RequestLogger(zapLogger))
-
 	r.Use(middleware.Recoverer)
 
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
+
 	r.Group(func(r chi.Router) {
 		r.Use(handlers.ClientAuthMiddleware(cfg.BotAPIKey))
 		r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
@@ -198,8 +213,10 @@ func run() error {
 		r.Post("/api/v1/feedback", feedbackHandler.CreateFeedback)
 		r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
 	})
+
 	r.Post("/api/v1/auth/login", authHandler.Login)
 	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
+
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
 
@@ -207,7 +224,7 @@ func run() error {
 		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))
 		r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
 	})
-	// Observability Routes
+
 	r.Handle("/metrics", metrics.NewHandler())
 
 	srv := &http.Server{
@@ -219,11 +236,14 @@ func run() error {
 	}
 
 	serverErr := make(chan error, 1)
+
 	go func() {
 		zapLogger.Info("app starting", zap.String("addr", srv.Addr))
+
 		if listenErr := srv.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
 			serverErr <- listenErr
 		}
+
 		close(serverErr)
 	}()
 
@@ -247,6 +267,7 @@ func run() error {
 	}
 
 	rootCancel()
+
 	done := make(chan struct{})
 
 	go func() {
@@ -262,12 +283,14 @@ func run() error {
 	}
 
 	zapLogger.Info("server exited")
+
 	return nil
 }
 
 // All workers should respect root context cancellation.
 func startWorker(wg *sync.WaitGroup, fn func()) {
 	wg.Add(1)
+
 	go func() {
 		defer wg.Done()
 		fn()
@@ -280,15 +303,15 @@ func decodeEncryptionKey(encoded string) ([]byte, error) {
 	}
 
 	key, err := func() ([]byte, error) {
-	clean := strings.TrimSpace(encoded)
+		clean := strings.TrimSpace(encoded)
 
-	decoded, err := base64.StdEncoding.DecodeString(clean)
-	if err == nil {
-		return decoded, nil
-	}
+		decoded, decodeErr := base64.StdEncoding.DecodeString(clean)
+		if decodeErr == nil {
+			return decoded, nil
+		}
 
-	return base64.RawStdEncoding.DecodeString(clean)
-}()
+		return base64.RawStdEncoding.DecodeString(clean)
+	}()
 	if err != nil {
 		return nil, errors.New("ENCRYPTION_KEY must be valid base64")
 	}
