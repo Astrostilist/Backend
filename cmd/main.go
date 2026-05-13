@@ -14,6 +14,7 @@ import (
 
 	"astroapi/config"
 	"astroapi/internal/admin"
+	"astroapi/internal/adminlogs"
 	"astroapi/internal/alisa"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
@@ -116,6 +117,7 @@ func run() error {
 	// 3. Repositories
 	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
 	requestsRepo := requests.NewPostgresRepository(db.DB)
+	adminLogsRepo := adminlogs.NewPostgresRepository(db.DB)
 	rulesRepo := rules.NewPostgresRepository(db.DB, zapLogger)
 	productsRepo := products.NewPostgresRepository(db.DB)
 	adminRepo := admin.NewPostgresRepository(db.DB)
@@ -180,6 +182,7 @@ func run() error {
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
+	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
 	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
 
 	dlqreader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
@@ -200,6 +203,7 @@ func run() error {
 	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
+	handlers.RegisterAdminLogsRoutes(r, cfg.AdminToken, adminLogsHandler)
 
 	r.Group(func(r chi.Router) {
 		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))

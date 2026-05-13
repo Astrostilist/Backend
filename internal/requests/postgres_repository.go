@@ -12,58 +12,40 @@ type PostgresRepository struct {
 	db *sql.DB
 }
 
+// NewPostgresRepository создает PostgreSQL-репозиторий requests_log.
+// На вход принимает соединение с БД, на выход возвращает готовый репозиторий.
 func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// Create создает новую запись запроса в requests_log.
+// На вход принимает контекст и данные запроса, на выход возвращает ошибку записи.
 func (r *PostgresRepository) Create(ctx context.Context, req Request) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin create request tx: %w", err)
-	}
-
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	const requestQuery = `
+	const query = `
 		INSERT INTO requests_log (request_id, user_id, scenario, status, attempt_count)
 		VALUES ($1, $2, $3, $4, $5)
 	`
-	if _, err = tx.ExecContext(ctx, requestQuery,
+	if _, err := r.db.ExecContext(ctx, query,
 		req.RequestID, req.UserID, req.Scenario, req.Status, req.AttemptCount,
 	); err != nil {
 		return fmt.Errorf("insert requests_log: %w", err)
 	}
-
-	const resultQuery = `
-		INSERT INTO generation_results (request_id, status)
-		VALUES ($1, $2)
-	`
-	if _, err = tx.ExecContext(ctx, resultQuery, req.RequestID, StatusPending); err != nil {
-		return fmt.Errorf("insert generation_results: %w", err)
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("commit create request tx: %w", err)
-	}
-	committed = true
 	return nil
 }
 
+// StartProcessing атомарно переводит запрос из pending в processing.
+// На вход принимает контекст и request_id, на выход возвращает флаг успешного старта и ошибку.
 func (r *PostgresRepository) StartProcessing(ctx context.Context, requestID string) (bool, error) {
 	const query = `
-		UPDATE generation_results
+		UPDATE requests_log
 		SET status     = $2,
-		    updated_at = CURRENT_TIMESTAMP
+		    updated_at = CURRENT_TIMESTAMP,
+		    completed_at = NULL
 		WHERE request_id = $1 AND status = $3
 	`
 	res, err := r.db.ExecContext(ctx, query, requestID, StatusProcessing, StatusPending)
 	if err != nil {
-		return false, fmt.Errorf("start processing generation_results: %w", err)
+		return false, fmt.Errorf("start processing requests_log: %w", err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
@@ -72,79 +54,49 @@ func (r *PostgresRepository) StartProcessing(ctx context.Context, requestID stri
 	return rows > 0, nil
 }
 
+// UpdateStatus обновляет статус, результат и ошибку запроса в requests_log.
+// На вход принимает контекст, request_id, новый статус, JSON-результат и текст ошибки; на выход возвращает ошибку обновления.
 func (r *PostgresRepository) UpdateStatus(ctx context.Context, requestID, status string, result []byte, errReason string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin update request tx: %w", err)
-	}
-
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
 	var resultArg any
 	if len(result) > 0 {
 		resultArg = string(result)
 	}
 
-	const generationQuery = `
-		UPDATE generation_results
-		SET status         = $2,
-		    result_payload = COALESCE($3::jsonb, result_payload),
-		    error_reason   = NULLIF($4, ''),
-		    updated_at     = CURRENT_TIMESTAMP
-		WHERE request_id = $1
-	`
-	res, err := tx.ExecContext(ctx, generationQuery, requestID, status, resultArg, errReason)
-	if err != nil {
-		return fmt.Errorf("update generation_results: %w", err)
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("rows affected generation_results: %w", err)
-	}
-	if rows == 0 {
-		return ErrNotFound
-	}
-
-	const requestQuery = `
+	const query = `
 		UPDATE requests_log
 		SET status         = $2,
 		    result_payload = COALESCE($3::jsonb, result_payload),
 		    error_reason   = NULLIF($4, ''),
 		    attempt_count  = attempt_count + 1,
-		    updated_at     = CURRENT_TIMESTAMP
+		    updated_at     = CURRENT_TIMESTAMP,
+		    completed_at   = CASE
+		        WHEN $2 IN ('completed', 'failed') THEN CURRENT_TIMESTAMP
+		        ELSE NULL
+		    END
 		WHERE request_id = $1
 	`
-	res, err = tx.ExecContext(ctx, requestQuery, requestID, status, resultArg, errReason)
+	res, err := r.db.ExecContext(ctx, query, requestID, status, resultArg, errReason)
 	if err != nil {
 		return fmt.Errorf("update requests_log: %w", err)
 	}
-	rows, err = res.RowsAffected()
+	rows, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("rows affected requests_log: %w", err)
 	}
 	if rows == 0 {
 		return ErrNotFound
 	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("commit update request tx: %w", err)
-	}
-	committed = true
 	return nil
 }
 
+// Get возвращает состояние запроса из requests_log по request_id.
+// На вход принимает контекст и request_id, на выход возвращает данные запроса или ошибку.
 func (r *PostgresRepository) Get(ctx context.Context, requestID string) (Request, error) {
 	const query = `
-		SELECT rl.request_id, rl.user_id, rl.scenario, gr.status, rl.attempt_count,
-		       COALESCE(gr.error_reason, ''), COALESCE(gr.result_payload::text, '')
-		FROM generation_results gr
-		JOIN requests_log rl ON rl.request_id = gr.request_id
-		WHERE gr.request_id = $1
+		SELECT request_id, user_id, scenario, status, attempt_count,
+		       COALESCE(error_reason, ''), COALESCE(result_payload::text, '')
+		FROM requests_log
+		WHERE request_id = $1
 	`
 	row := r.db.QueryRowContext(ctx, query, requestID)
 
@@ -157,7 +109,7 @@ func (r *PostgresRepository) Get(ctx context.Context, requestID string) (Request
 		if errors.Is(err, sql.ErrNoRows) {
 			return Request{}, ErrNotFound
 		}
-		return Request{}, fmt.Errorf("scan generation_results: %w", err)
+		return Request{}, fmt.Errorf("scan requests_log: %w", err)
 	}
 	if resultText != "" {
 		req.Result = []byte(resultText)

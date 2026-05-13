@@ -126,7 +126,7 @@ func beginRequestProcessing(
 }
 
 // ProfileProcessor обрабатывает сообщения astro.events.profile.
-// Сохраняет пользователя (с шифрованием birth_date) и обновляет generation_results.
+// Сохраняет пользователя (с шифрованием birth_date) и обновляет requests_log.
 type ProfileProcessor struct {
 	userRepo     user.Repository
 	requestsRepo requests.Repository
@@ -182,7 +182,7 @@ func (p *ProfileProcessor) markFailed(ctx context.Context, requestID string, err
 }
 
 // RecommendProcessor обрабатывает сообщения astro.events.recommend.
-// Строит рекомендацию через AlisaAI и пишет результат в generation_results.
+// Строит рекомендацию через AlisaAI и пишет результат в requests_log.
 type RecommendProcessor struct {
 	userRepo     user.Repository
 	requestsRepo requests.Repository
