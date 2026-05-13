@@ -4,6 +4,7 @@ import (
 	"astroapi/config"
 	"net/http"
 	"sync"
+	"errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -86,7 +87,8 @@ func initializeMetrics(cfg *config.Config) {
 
 func safeRegister(collector prometheus.Collector) {
 	if err := registry.Register(collector); err != nil {
-		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+		var alreadyRegistered prometheus.AlreadyRegisteredError
+		if !errors.As(err, &alreadyRegistered) {
 			panic(err)
 		}
 	}
