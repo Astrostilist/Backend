@@ -14,7 +14,6 @@ import (
 
 	"astroapi/config"
 	"astroapi/internal/resilience"
-	"astroapi/internal/resilience"
 
 	"github.com/nats-io/nats.go/jetstream"
 	"go.uber.org/zap"
