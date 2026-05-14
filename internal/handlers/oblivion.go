@@ -28,7 +28,7 @@ func (h *Handler) OblivionHandler(w http.ResponseWriter, r *http.Request) {
 	found, err := h.Repo.DeleteUsers(r.Context(), userID)
 	if err != nil {
 		log.Error("failed to delete user", zap.String("user_id", userID), zap.Error(err))
-		writeError(w, http.StatusInternalServerError, "Internal Server Error")
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	// проверка было ли что-то удалено
