@@ -12,16 +12,16 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/pressly/goose"
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"gotest.tools/assert"
 )
 
 func TestCreate(t *testing.T) {
-	// if testing.Short() {
-	// 	t.Skip("models: skipping integration test")
-	// }
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 
 	tests := []struct {
 		name      string
@@ -130,9 +130,9 @@ func TestCreate(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	// if testing.Short() {
-	// 	t.Skip("models: skipping integration test")
-	// }
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 
 	tests := []struct {
 		name       string
@@ -263,9 +263,9 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	// if testing.Short() {
-	// 	t.Skip("models: skipping integration test")
-	// }
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 
 	tests := []struct {
 		name         string
@@ -468,9 +468,9 @@ func TestList(t *testing.T) {
 }
 
 func TestDeactivate(t *testing.T) {
-	// if testing.Short() {
-	// 	t.Skip("models: skipping integration test")
-	// }
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 
 	tests := []struct {
 		name       string
@@ -577,9 +577,9 @@ func TestDeactivate(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	// if testing.Short() {
-	// 	t.Skip("models: skipping integration test")
-	// }
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 
 	tests := []struct {
 		name      string

@@ -21,7 +21,7 @@ ALTER TABLE requests_log
 -- CHECK constraint: защищает от попадания мусора в status
 ALTER TABLE requests_log
     ADD CONSTRAINT chk_requests_log_status
-    CHECK (status IN ('accepted', 'processing', 'completed', 'failed'));
+    CHECK (status IN ('pending', 'processing', 'completed', 'failed'));
 
 -- CHECK constraint: scenario
 ALTER TABLE requests_log

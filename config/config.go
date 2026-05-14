@@ -14,9 +14,9 @@ type Config struct {
 	LogServiceName string
 	LogLevel       string
 	Environment    string
-
-	AdminToken    string
-	EncryptionKey string
+	AdminToken     string
+	BotAPIKey      string
+	EncryptionKey  string
 
 	MemcachedHost string
 
@@ -32,14 +32,17 @@ type Config struct {
 	DBSSLMode  string
 
 	// Pool settings
-	DBMaxConns        int32
-	DBMinConns        int32
-	DBMaxConnLifetime time.Duration
-	DBMaxConnIdleTime time.Duration
+	DBMaxConns          int32
+	DBMinConns          int32
+	DBMaxConnLifetime   time.Duration
+	DBMaxConnIdleTime   time.Duration
+	DBHealthCheckPeriod time.Duration
 
 	// NATS
-	NATSHost string
-	NATSPort string
+	NATSHost      string
+	NATSPort      string
+	NATSClusterID string
+	NATSClientID  string
 
 	// AI
 	AIBaseURL   string
@@ -60,11 +63,12 @@ func Load() *Config {
 		LogLevel:       getEnv("LOG_LEVEL", "INFO"),
 		Environment:    getEnv("ENVIRONMENT", "dev"),
 
-		AdminToken:    getEnv("ADMIN_TOKEN", ""),
-		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
-
 		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
 		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
+
+		AdminToken:    getEnv("ADMIN_TOKEN", ""),
+		BotAPIKey:     getEnv("BOT_API_KEY", ""),
+		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
 
 		MemcachedHost: getEnv("MEMCACHED_HOST", "localhost:11211"),
 
@@ -75,13 +79,16 @@ func Load() *Config {
 		DBName:     getEnv("DB_NAME", "astrobackend"),
 		DBSSLMode:  getEnv("DB_SSL_MODE", "disable"),
 
-		DBMaxConns:        getEnvAsInt32("DB_MAX_CONNS", 50),
-		DBMinConns:        getEnvAsInt32("DB_MIN_CONNS", 20),
-		DBMaxConnLifetime: getEnvAsDuration("DB_MAX_CONN_LIFETIME", time.Hour),
-		DBMaxConnIdleTime: getEnvAsDuration("DB_MAX_CONN_IDLE_TIME", 30*time.Minute),
+		DBMaxConns:          getEnvAsInt32("DB_MAX_CONNS", 50),
+		DBMinConns:          getEnvAsInt32("DB_MIN_CONNS", 20),
+		DBMaxConnLifetime:   getEnvAsDuration("DB_MAX_CONN_LIFETIME", time.Hour),
+		DBMaxConnIdleTime:   getEnvAsDuration("DB_MAX_CONN_IDLE_TIME", 30*time.Minute),
+		DBHealthCheckPeriod: getEnvAsDuration("DB_HEALTH_CHECK_PERIOD", time.Minute),
 
-		NATSHost: getEnv("NATS_HOST", "localhost"),
-		NATSPort: getEnv("NATS_PORT", "4222"),
+		NATSHost:      getEnv("NATS_HOST", "localhost"),
+		NATSPort:      getEnv("NATS_PORT", "4222"),
+		NATSClusterID: getEnv("NATS_CLUSTER_ID", "test-cluster"),
+		NATSClientID:  getEnv("NATS_CLIENT_ID", "astro-backend"),
 
 		AIBaseURL:   getEnv("AI_BASE_URL", "https://ai.api.cloud.yandex.net/v1"),
 		AIAPIKey:    getEnv("AI_API_KEY", ""),

@@ -3,7 +3,6 @@ package repositories
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"strings"
 
 	"astroapi/internal/models"
@@ -30,10 +29,10 @@ func (r *feedbackPG) Create(ctx context.Context, f *models.Feedback) error {
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "unique constraint") || strings.Contains(errStr, "23505") {
-			return errors.New("отзыв для этого request_id уже существует")
+			return models.ErrFeedbackExists
 		}
 		if strings.Contains(errStr, "foreign key constraint") || strings.Contains(errStr, "23503") {
-			return errors.New("указанный request_id не найден")
+			return models.ErrRequestNotFound
 		}
 		return err
 	}

@@ -1,5 +1,5 @@
 // Package requests хранит журнал обращений пользователей и результаты генерации.
-// requests_log используется для аудита, generation_results — для идемпотентности воркера.
+// requests_log используется как единый источник статусов, результата и ошибок обработки.
 package requests
 
 import (
@@ -16,8 +16,7 @@ var (
 
 // Статусы обработки.
 const (
-	StatusPending = "pending"
-	StatusAccepted   = StatusPending
+	StatusPending    = "pending"
 	StatusProcessing = "processing"
 	StatusCompleted  = "completed"
 	StatusFailed     = "failed"
@@ -34,7 +33,7 @@ type Request struct {
 	Result       []byte // JSON payload
 }
 
-// Repository описывает журнал запросов и таблицу generation_results.
+// Repository описывает операции над единым журналом requests_log.
 type Repository interface {
 	Create(ctx context.Context, req Request) error
 	StartProcessing(ctx context.Context, requestID string) (bool, error)

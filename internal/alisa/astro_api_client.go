@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"astroapi/config"
-	"astroapi/internal/circutebreaker"
 	"astroapi/internal/resilience"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -44,6 +43,7 @@ func (m jetStreamAstroCacheManager) GetOrCreateBucket(ctx context.Context, bucke
 	if err == nil {
 		return kv, nil
 	}
+
 	if !errors.Is(err, jetstream.ErrBucketNotFound) {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ type AstroAPIClientOptions struct {
 	HTTPClient  *http.Client
 	CacheBucket string
 	CacheTTL    time.Duration
-	Metrics     *circutebreaker.Registry
+	Metrics     resilience.StateReporter
 	Breaker     *resilience.CircuitBreaker
 }
 
@@ -110,7 +110,13 @@ func NewAstroAPIClient(baseURL string, js jetstream.KeyValueManager, logger *zap
 
 	breaker := opts.Breaker
 	if breaker == nil {
-		breaker = resilience.NewCircuitBreaker("astro_api", 5, 30*time.Second, logger, opts.Metrics)
+		breaker = resilience.NewCircuitBreaker(
+			"astro_api",
+			5,
+			30*time.Second,
+			logger,
+			opts.Metrics,
+		)
 	}
 
 	return &AstroAPIClient{
@@ -124,16 +130,30 @@ func NewAstroAPIClient(baseURL string, js jetstream.KeyValueManager, logger *zap
 	}
 }
 
-func NewAstroAPIClientFromConfig(cfg *config.Config, js jetstream.KeyValueManager, logger *zap.Logger) *AstroAPIClient {
+func NewAstroAPIClientFromConfig(
+	cfg *config.Config,
+	js jetstream.KeyValueManager,
+	logger *zap.Logger,
+	metricsReporter resilience.StateReporter,
+) *AstroAPIClient {
 	baseURL := ""
 	if cfg != nil {
 		baseURL = cfg.AstroAPIURL
 	}
-	return NewAstroAPIClient(baseURL, js, logger, AstroAPIClientOptions{})
+
+	return NewAstroAPIClient(baseURL, js, logger, AstroAPIClientOptions{
+		Metrics: metricsReporter,
+	})
 }
 
-func NewAstroAPIClientFromEnv(js jetstream.KeyValueManager, logger *zap.Logger) *AstroAPIClient {
-	return NewAstroAPIClient(os.Getenv("ASTRO_API_URL"), js, logger, AstroAPIClientOptions{})
+func NewAstroAPIClientFromEnv(
+	js jetstream.KeyValueManager,
+	logger *zap.Logger,
+	metricsReporter resilience.StateReporter,
+) *AstroAPIClient {
+	return NewAstroAPIClient(os.Getenv("ASTRO_API_URL"), js, logger, AstroAPIClientOptions{
+		Metrics: metricsReporter,
+	})
 }
 
 func (c *AstroAPIClient) GetAstroProfile(birthDate, birthPlace string) (AstroProfile, error) {
@@ -158,6 +178,7 @@ func (c *AstroAPIClient) GetAstroProfile(birthDate, birthPlace string) (AstroPro
 		if err != nil {
 			return profile, err
 		}
+
 		if found {
 			return cachedProfile, nil
 		}
@@ -194,12 +215,15 @@ func (c *AstroAPIClient) getCachedProfile(ctx context.Context, cacheKey string) 
 		if err = json.Unmarshal(entry.Value(), &profile); err != nil {
 			return profile, false, fmt.Errorf("decode cached astro profile: %w", err)
 		}
+
 		c.logger.Debug("astro profile cache hit", zap.String("key", cacheKey))
+
 		return profile, true, nil
 	}
 
 	if errors.Is(err, jetstream.ErrKeyNotFound) {
 		c.logger.Debug("astro profile cache miss", zap.String("key", cacheKey))
+
 		return profile, false, nil
 	}
 
@@ -242,6 +266,7 @@ func (c *AstroAPIClient) fetchProfile(ctx context.Context, birthDate, birthPlace
 	if err != nil {
 		return profile, fmt.Errorf("send astro API request: %w", err)
 	}
+
 	defer func() {
 		if err := response.Body.Close(); err != nil {
 			c.logger.Error("failed to close response body", zap.Error(err))
@@ -254,7 +279,11 @@ func (c *AstroAPIClient) fetchProfile(ctx context.Context, birthDate, birthPlace
 	}
 
 	if response.StatusCode >= http.StatusBadRequest {
-		return profile, fmt.Errorf("astro API request failed: status=%d body=%s", response.StatusCode, strings.TrimSpace(string(body)))
+		return profile, fmt.Errorf(
+			"astro API request failed: status=%d body=%s",
+			response.StatusCode,
+			strings.TrimSpace(string(body)),
+		)
 	}
 
 	profile, err = decodeAstroProfile(body)
@@ -265,6 +294,7 @@ func (c *AstroAPIClient) fetchProfile(ctx context.Context, birthDate, birthPlace
 	if profile.BirthDate == "" {
 		profile.BirthDate = birthDate
 	}
+
 	if profile.BirthPlace == "" {
 		profile.BirthPlace = birthPlace
 	}
@@ -300,6 +330,7 @@ func decodeAstroProfile(payload []byte) (AstroProfile, error) {
 	if !envelope.Profile.IsZero() {
 		return envelope.Profile, nil
 	}
+
 	if !envelope.Data.IsZero() {
 		return envelope.Data, nil
 	}

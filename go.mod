@@ -29,7 +29,6 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/bradfitz/gomemcache v0.0.0-20250403215159-8d39553ac7cf
 	github.com/nats-io/nats-server/v2 v2.12.7
-	github.com/pressly/goose v2.7.0+incompatible
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/prometheus/client_golang v1.23.2
 	gotest.tools v2.2.0+incompatible
