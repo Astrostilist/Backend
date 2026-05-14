@@ -102,6 +102,9 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 
 	requestID := uuid.New().String()
 
+	// TODO:
+	// + begin transaction
+	// store user request
 	if err := h.requestsRepo.Create(r.Context(), requests.Request{
 		RequestID: requestID,
 		UserID:    req.UserID,
@@ -113,6 +116,7 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// store user (DB or cache)
 	err := h.uc.Execute(r.Context(), usecases.ProcessPersonalDataInput{
 		PersonalData: domain.PersonalData{
 			UserID:       req.UserID,
@@ -139,6 +143,9 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to publish event")
 		return
 	}
+
+	// TODO:
+	// - end transaction
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)

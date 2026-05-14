@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"astroapi/internal/alisa"
+	astroproc "astroapi/internal/astroproc"
 	"astroapi/internal/requests"
 	"astroapi/internal/user"
 
@@ -105,7 +106,6 @@ func beginRequestProcessing(
 		return false, nil
 	}
 
-	// TODO: вызов astro API
 	started, err := repo.StartProcessing(ctx, requestID)
 	if err != nil {
 		return false, err
@@ -127,15 +127,18 @@ func beginRequestProcessing(
 }
 
 // ProfileProcessor обрабатывает сообщения astro.events.profile.
-// Сохраняет пользователя (с шифрованием birth_date) и обновляет requests_log.
+// Сохраняет астропрофиль пользователя и обновляет requests_log.
+
 type ProfileProcessor struct {
 	userRepo     user.Repository
 	requestsRepo requests.Repository
+	astroproc    astroproc.AstroProc
 	logger       *zap.Logger
 }
 
-func NewProfileProcessor(userRepo user.Repository, requestsRepo requests.Repository, logger *zap.Logger) *ProfileProcessor {
-	return &ProfileProcessor{userRepo: userRepo, requestsRepo: requestsRepo, logger: logger}
+func NewProfileProcessor(userRepo user.Repository, requestsRepo requests.Repository,
+	astroproc astroproc.AstroProc, logger *zap.Logger) *ProfileProcessor {
+	return &ProfileProcessor{userRepo: userRepo, requestsRepo: requestsRepo, astroproc: astroproc, logger: logger}
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
@@ -158,7 +161,19 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 		return nil
 	}
 
-	// consent_given=false: дата рождения не сохраняется в БД (GDPR / ФЗ-152).
+	// TODO: get astroprofile from cache or astro API call instead of user save
+	// user had saved in (h *ProfileHandler) HandleProfile
+	profile, err := p.astroproc.GetAstroProfile(ctx, msg.Profile.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to get astro profile: %v", err)
+	}
+
+	p.logger.Info("got astro profile", zap.String("userID", msg.Profile.UserID), zap.Any("data", profile))
+
+	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, nil, ""); err != nil {
+		p.logger.Error("failed to mark profile request as completed", zap.Error(err))
+	}
+	/*// consent_given=false: дата рождения не сохраняется в БД (GDPR / ФЗ-152).
 	if msg.Profile.ConsentGiven {
 		if err := p.userRepo.Save(ctx, user.User{
 			UserID:       msg.Profile.UserID,
@@ -175,7 +190,7 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 
 	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, nil, ""); err != nil {
 		p.logger.Error("failed to mark profile request as completed", zap.Error(err))
-	}
+	}*/
 	return nil
 }
 

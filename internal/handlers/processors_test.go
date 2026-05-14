@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	almocks "astroapi/internal/alisa/mocks"
+	astromock "astroapi/internal/astroproc/mocks"
 	"astroapi/internal/handlers"
 	"astroapi/internal/requests"
 	reqmocks "astroapi/internal/requests/mocks"
@@ -24,6 +25,7 @@ func TestProfileProcessor_HappyPath(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
+	astroproc := astromock.NewMockAstroProc(ctrl)
 
 	reqRepo.EXPECT().
 		Get(gomock.Any(), "req-1").
@@ -38,7 +40,7 @@ func TestProfileProcessor_HappyPath(t *testing.T) {
 		UpdateStatus(gomock.Any(), "req-1", "completed", gomock.Nil(), "").
 		Return(nil).Times(1)
 
-	p := handlers.NewProfileProcessor(userRepo, reqRepo, zap.NewNop())
+	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroproc, zap.NewNop())
 
 	payload, _ := json.Marshal(map[string]any{
 		"request_id": "req-1",
@@ -57,9 +59,11 @@ func TestProfileProcessor_ValidationError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
+	astroproc := astromock.NewMockAstroProc(ctrl)
+
 	// Save и UpdateStatus не должны вызываться
 
-	p := handlers.NewProfileProcessor(userRepo, reqRepo, zap.NewNop())
+	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroproc, zap.NewNop())
 
 	payload, _ := json.Marshal(map[string]any{
 		"request_id": "req-1",
@@ -78,6 +82,7 @@ func TestProfileProcessor_SaveFailureMarksRequestFailed(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
+	astroproc := astromock.NewMockAstroProc(ctrl)
 
 	saveErr := errors.New("db down")
 	reqRepo.EXPECT().
@@ -91,7 +96,7 @@ func TestProfileProcessor_SaveFailureMarksRequestFailed(t *testing.T) {
 		UpdateStatus(gomock.Any(), "req-1", "failed", gomock.Nil(), gomock.Any()).
 		Return(nil).Times(1)
 
-	p := handlers.NewProfileProcessor(userRepo, reqRepo, zap.NewNop())
+	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroproc, zap.NewNop())
 	payload, _ := json.Marshal(map[string]any{
 		"request_id": "req-1",
 		"profile": map[string]any{

@@ -13,6 +13,7 @@ import (
 
 	"astroapi/config"
 	"astroapi/internal/alisa"
+	astroproc "astroapi/internal/astroproc"
 	"astroapi/internal/handlers"
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/models"
@@ -206,8 +207,9 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	personalDataRepo := newMemPersonalDataRepo()
 	personalDataCache := newMemPersonalDataCache()
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(personalDataRepo, personalDataCache)
+	astroClient := &astroproc.AstroProcClient{}
 
-	profileProc := handlers.NewProfileProcessor(userRepo, reqRepo, logger)
+	profileProc := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, logger)
 	router := handlers.NewMsgRouter(logger)
 	router.Register(models.MsgProfileSubj, profileProc)
 

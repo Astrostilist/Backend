@@ -10,6 +10,7 @@
 package mocks
 
 import (
+	models "astroapi/internal/models"
 	context "context"
 	reflect "reflect"
 
@@ -90,4 +91,43 @@ func (m *MockMsgPublisher) PublishMessage(ctx context.Context, streamName, subje
 func (mr *MockMsgPublisherMockRecorder) PublishMessage(ctx, streamName, subject, payload any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PublishMessage", reflect.TypeOf((*MockMsgPublisher)(nil).PublishMessage), ctx, streamName, subject, payload)
+}
+
+// MockMsgDLQReader is a mock of MsgDLQReader interface.
+type MockMsgDLQReader struct {
+	ctrl     *gomock.Controller
+	recorder *MockMsgDLQReaderMockRecorder
+	isgomock struct{}
+}
+
+// MockMsgDLQReaderMockRecorder is the mock recorder for MockMsgDLQReader.
+type MockMsgDLQReaderMockRecorder struct {
+	mock *MockMsgDLQReader
+}
+
+// NewMockMsgDLQReader creates a new mock instance.
+func NewMockMsgDLQReader(ctrl *gomock.Controller) *MockMsgDLQReader {
+	mock := &MockMsgDLQReader{ctrl: ctrl}
+	mock.recorder = &MockMsgDLQReaderMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockMsgDLQReader) EXPECT() *MockMsgDLQReaderMockRecorder {
+	return m.recorder
+}
+
+// GetMessages mocks base method.
+func (m *MockMsgDLQReader) GetMessages(ctx context.Context) ([]models.Message, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetMessages", ctx)
+	ret0, _ := ret[0].([]models.Message)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetMessages indicates an expected call of GetMessages.
+func (mr *MockMsgDLQReaderMockRecorder) GetMessages(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMessages", reflect.TypeOf((*MockMsgDLQReader)(nil).GetMessages), ctx)
 }

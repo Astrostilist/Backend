@@ -17,6 +17,7 @@ import (
 	"astroapi/internal/admin"
 	"astroapi/internal/adminlogs"
 	"astroapi/internal/alisa"
+	astroproc "astroapi/internal/astroproc"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
 	infra "astroapi/internal/infrastructure"
@@ -148,7 +149,9 @@ func run() error {
 		},
 	)
 
-	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, zapLogger)
+	astroClient := astroproc.NewAstroAPIClient(cfg.AstroAPIURL, db.DB, zapLogger)
+
+	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, astroClient, zapLogger)
 	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, zapLogger)
 
 	msgRouter := handlers.NewMsgRouter(zapLogger)

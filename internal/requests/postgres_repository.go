@@ -64,15 +64,15 @@ func (r *PostgresRepository) UpdateStatus(ctx context.Context, requestID, status
 
 	const query = `
 		UPDATE requests_log
-		SET status         = $2,
-		    result_payload = COALESCE($3::jsonb, result_payload),
-		    error_reason   = NULLIF($4, ''),
-		    attempt_count  = attempt_count + 1,
-		    updated_at     = CURRENT_TIMESTAMP,
-		    completed_at   = CASE
-		        WHEN $2 IN ('completed', 'failed') THEN CURRENT_TIMESTAMP
-		        ELSE NULL
-		    END
+		SET status = CAST($2 AS VARCHAR),
+			result_payload = COALESCE($3::jsonb, result_payload),
+			error_reason = NULLIF($4, ''),
+			attempt_count = attempt_count + 1,
+			updated_at = CURRENT_TIMESTAMP,
+			completed_at = CASE
+				WHEN CAST($2 AS VARCHAR) IN ('completed', 'failed') THEN CURRENT_TIMESTAMP
+				ELSE NULL
+			END
 		WHERE request_id = $1
 	`
 	res, err := r.db.ExecContext(ctx, query, requestID, status, resultArg, errReason)
