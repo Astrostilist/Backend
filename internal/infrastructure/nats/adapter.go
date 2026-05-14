@@ -23,10 +23,17 @@ type NATSConn struct {
 
 var backOff = [4]time.Duration{
 	5 * time.Second,
+	10 * time.Second,
+	15 * time.Second,
+	20 * time.Second,
+}
+
+/*var backOff = [4]time.Duration{
+	5 * time.Second,
 	30 * time.Second,
 	5 * time.Minute,
 	1 * time.Hour,
-}
+}*/
 
 func InitNATS(ctx context.Context, logger *zap.Logger, cfg *config.Config) (*NATSConn, error) {
 	opts := []nats.Option{
@@ -120,23 +127,25 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 			Name: models.MsgProfileWrk,
 			// точный subject + (опциональный) хвост на будущее: `astro.events.profile`
 			// и любые `astro.events.profile.*` (fan-out по request_id и т.п.)
-			FilterSubjects:    []string{models.MsgProfileSubj, fmt.Sprint(models.MsgProfileSubj, ".>")},
-			AckPolicy:         jetstream.AckExplicitPolicy,
-			ReplayPolicy:      jetstream.ReplayInstantPolicy,
-			AckWait:           30 * time.Second,
-			MaxAckPending:     1000,
-			BackOff:           backOff[:],
-			InactiveThreshold: 0,
+			FilterSubjects: []string{models.MsgProfileSubj, fmt.Sprint(models.MsgProfileSubj, ".>")},
+			AckPolicy:      jetstream.AckExplicitPolicy,
+			ReplayPolicy:   jetstream.ReplayInstantPolicy,
+			AckWait:        30 * time.Second,
+			MaxAckPending:  1000,
+			MaxDeliver:     models.MsgSMaxRetries * 5,
+			//BackOff:           backOff[:],
+			InactiveThreshold: 24 * time.Hour,
 		},
 		{
-			Name:              models.MsgRecommendWrk,
-			FilterSubjects:    []string{models.MsgRecommendSubj, fmt.Sprint(models.MsgRecommendSubj, ".>")},
-			AckPolicy:         jetstream.AckExplicitPolicy,
-			ReplayPolicy:      jetstream.ReplayInstantPolicy,
-			AckWait:           30 * time.Second,
-			MaxAckPending:     1000,
-			BackOff:           backOff[:],
-			InactiveThreshold: 0,
+			Name:           models.MsgRecommendWrk,
+			FilterSubjects: []string{models.MsgRecommendSubj, fmt.Sprint(models.MsgRecommendSubj, ".>")},
+			AckPolicy:      jetstream.AckExplicitPolicy,
+			ReplayPolicy:   jetstream.ReplayInstantPolicy,
+			AckWait:        30 * time.Second,
+			MaxAckPending:  1000,
+			MaxDeliver:     models.MsgSMaxRetries * 5,
+			//BackOff:           backOff[:],
+			InactiveThreshold: 24 * time.Hour,
 		},
 	}
 
@@ -158,7 +167,7 @@ func (r *JetStreamAdapter) initDLQConsumer(ctx context.Context) (jetstream.Consu
 
 	consumerCfg := jetstream.ConsumerConfig{
 		Name:              models.MsgDLQViewer,
-		FilterSubjects:    []string{fmt.Sprint(models.MsgProfileSubj, ".>"), fmt.Sprint(models.MsgRecommendSubj, ".>")},
+		FilterSubjects:    []string{fmt.Sprint(models.MsgDLQSubj, ">")},
 		DeliverPolicy:     jetstream.DeliverLastPolicy,
 		AckPolicy:         jetstream.AckExplicitPolicy,
 		ReplayPolicy:      jetstream.ReplayInstantPolicy,

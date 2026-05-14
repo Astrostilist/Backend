@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"astroapi/internal/alisa"
 	astroproc "astroapi/internal/astroproc"
@@ -101,9 +100,10 @@ func beginRequestProcessing(
 		return false, nil
 	}
 	if req.Status != requests.StatusPending {
-		logger.Info("request is not pending, skip processing",
-			zap.String("request_id", requestID), zap.String("status", req.Status))
-		return false, nil
+		return false, fmt.Errorf("request is not pending, skip processing")
+		//logger.Info("request is not pending, skip processing",
+		//	zap.String("request_id", requestID), zap.String("status", req.Status))
+		//return false, nil
 	}
 
 	started, err := repo.StartProcessing(ctx, requestID)
@@ -142,8 +142,6 @@ func NewProfileProcessor(userRepo user.Repository, requestsRepo requests.Reposit
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
-
-	time.Sleep(15 * time.Second) // TODO: test
 
 	var msg profilePayload
 	if err := json.Unmarshal(payload, &msg); err != nil {

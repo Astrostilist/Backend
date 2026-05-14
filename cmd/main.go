@@ -173,7 +173,6 @@ func run() error {
 		); consumeErr != nil {
 			zapLogger.Error("profile worker failed", zap.Error(consumeErr))
 		}
-
 		<-rootCtx.Done()
 	})
 
