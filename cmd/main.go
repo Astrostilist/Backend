@@ -25,17 +25,13 @@ import (
 	"astroapi/internal/logger"
 	"astroapi/internal/metrics"
 	astromidware "astroapi/internal/middleware"
-	natsadapter "astroapi/internal/nats"
-	"astroapi/internal/repositories"
-	natsinfra "astroapi/internal/repositories/nats"
-	"astroapi/internal/rules"
 	"astroapi/internal/models"
 	"astroapi/internal/products"
 	feedbackrepo "astroapi/internal/repositories"
+	repositories "astroapi/internal/repositories"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
 	"astroapi/internal/usecases"
-	repositories "astroapi/internal/usecases/repositories"
 	"astroapi/internal/user"
 
 	"github.com/go-chi/chi/v5"
@@ -138,6 +134,12 @@ func run() error {
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 
+	userRepositoryDelete := repositories.NewUserRepository(db.DB)
+	h := &handlers.Handler{
+		Repo:   userRepositoryDelete,
+		Logger: zapLogger,
+	}
+
 	healthRepo := health.NewHealthServiceRepo(db, natsConn)
 	monitor := infra.NewMonitorService(jsAdapter, healthRepo, zapLogger)
 
@@ -212,34 +214,25 @@ func run() error {
 	dlqReader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqReader, zapLogger)
 
-	userRepo := repositories.NewUserRepository(database.DB.DB)
-	h := &handlers.Handler{
-		Repo:   userRepo,
-		Logger: logger,
-	}
-
-	// Настраиваем роутер chi и middleware (единый блок)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(astromidware.RequestMetricsMiddleware())
 	r.Use(astromidware.RequestLogger(zapLogger))
 	r.Use(middleware.Recoverer)
 
-	if err := goose.SetDialect("postgres"); err != nil {
-		log.Fatal("Failed to set goose dialect:", err)
-	}
-
-	if err := goose.Up(database.DB.DB, "./migrations"); err != nil {
-		log.Fatal("Failed to apply migrations:", err)
-	}
-	log.Println("Migrations applied")
-
-	// Регистрируем ВСЕ маршруты
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
-	r.Post("/api/v1/astro/profile", handlers.ProfileHandler)
-	r.Post("/api/v1/astro/recommend", handlers.RecommendHandler)
-	r.Post("/api/v1/admin/catalog/import", handlers.ImportCatalogHandler)
-	r.Delete("/api/v1/user/{user_id}", h.OblivionHandler)
+
+	r.Group(func(r chi.Router) {
+		r.Use(handlers.ClientAuthMiddleware(cfg.BotAPIKey))
+		r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
+		r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
+		r.Post("/api/v1/feedback", feedbackHandler.CreateFeedback)
+		r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
+		r.Delete("/api/v1/user/{user_id}", h.OblivionHandler)
+	})
+
+	r.Post("/api/v1/auth/login", authHandler.Login)
+	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
 
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
@@ -250,7 +243,9 @@ func run() error {
 		r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
 	})
 
-	// Создаем HTTP сервер
+	r.Handle("/metrics", metrics.NewHandler())
+	r.Get("/api/v1/health", healthHandler.HandleHealth)
+
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,

@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"astroapi/internal/models"
+	"astroapi/internal/repositories/domain"
 	"astroapi/internal/requests"
 	"astroapi/internal/resilience"
 	"astroapi/internal/usecases"
-	"astroapi/internal/usecases/repositories/domain"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
