@@ -55,6 +55,13 @@ func (nc *NATSConn) DrainNATS() {
 	nc.Close()
 }
 
+func (nc *NATSConn) Ping(ctx context.Context) error {
+	if nc.IsConnected() {
+		return nil
+	}
+	return fmt.Errorf("nats is disconnected")
+}
+
 type JetStreamAdapter struct {
 	jetstream.JetStream
 	logger *zap.Logger

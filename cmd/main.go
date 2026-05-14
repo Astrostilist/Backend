@@ -19,6 +19,8 @@ import (
 	"astroapi/internal/alisa"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
+	infra "astroapi/internal/infrastructure"
+	health "astroapi/internal/infrastructure/health"
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/logger"
 	"astroapi/internal/metrics"
@@ -132,6 +134,9 @@ func run() error {
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 
+	healthRepo := health.NewHealthServiceRepo(db, natsConn)
+	monitor := infra.NewMonitorService(jsAdapter, healthRepo, zapLogger)
+
 	aiClient := alisa.NewClientWithOptions(
 		cfg.AIBaseURL,
 		cfg.AIAPIKey,
@@ -154,7 +159,7 @@ func run() error {
 
 	var wg sync.WaitGroup
 
-	startWorker(&wg, func() {
+	wg.Go(func() {
 		if consumeErr := consumer.ConsumeWithHandler(
 			rootCtx,
 			models.MsgStreamEvents,
@@ -169,7 +174,7 @@ func run() error {
 		<-rootCtx.Done()
 	})
 
-	startWorker(&wg, func() {
+	wg.Go(func() {
 		if consumeErr := consumer.ConsumeWithHandler(
 			rootCtx,
 			models.MsgStreamEvents,
@@ -184,12 +189,14 @@ func run() error {
 		<-rootCtx.Done()
 	})
 
-	startWorker(&wg, func() {
-		natsinfra.StartLagMonitor(rootCtx, jsAdapter)
+	wg.Go(func() {
+		defer wg.Done()
+		monitor.StartInfraMonitor(rootCtx)
 		<-rootCtx.Done()
 	})
 
 	helloHandler := handlers.NewHelloHandler(handlers.NewRealHelloService(db))
+	healthHandler := handlers.NewHealthHandler(healthRepo)
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
@@ -230,6 +237,7 @@ func run() error {
 	})
 
 	r.Handle("/metrics", metrics.NewHandler())
+	r.Get("/api/v1/health", healthHandler.HandleHealth)
 
 	srv := &http.Server{
 		Addr:         ":8080",
@@ -289,16 +297,6 @@ func run() error {
 	zapLogger.Info("server exited")
 
 	return nil
-}
-
-// All workers should respect root context cancellation.
-func startWorker(wg *sync.WaitGroup, fn func()) {
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-		fn()
-	}()
 }
 
 func decodeEncryptionKey(encoded string) ([]byte, error) {

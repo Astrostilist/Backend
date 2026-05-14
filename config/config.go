@@ -60,7 +60,7 @@ func Load() *Config {
 
 	return &Config{
 		LogServiceName: getEnv("LOG_SERVICE_NAME", "astro-backend"),
-		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		LogLevel:       getEnv("LOG_LEVEL", "INFO"),
 		Environment:    getEnv("ENVIRONMENT", "dev"),
 
 		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
