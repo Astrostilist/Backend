@@ -27,7 +27,6 @@ import (
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
 	"astroapi/internal/products"
-	feedbackrepo "astroapi/internal/repositories"
 	repositories "astroapi/internal/repositories"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
@@ -209,7 +208,7 @@ func run() error {
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
 	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
 	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
-	feedbackHandler := handlers.NewFeedbackHandler(feedbackrepo.NewFeedbackRepository(db.DB))
+	feedbackHandler := handlers.NewFeedbackHandler(repositories.NewFeedbackRepository(db.DB))
 
 	dlqReader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqReader, zapLogger)
