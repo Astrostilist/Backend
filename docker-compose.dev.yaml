@@ -1,0 +1,108 @@
+# docker-compose.dev.yaml — для локальной разработки.
+# Поднимает инфраструктуру (postgres, nats, memcached, jaeger) и app с hot-reload через air:
+#   make dev-up # приложение читает .env (см. .env.local.template)
+
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-astrobackend}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata-local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nats:
+    image: nats:alpine
+    command: ["-js", "-c", "/etc/nats/nats-server.conf"]
+    volumes:
+      - nats-data-local:/data
+      - ./docker/nats/nats-server.conf:/etc/nats/nats-server.conf:ro
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://localhost:8222/healthz?js-enabled-only=true >/dev/null 2>&1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  memcached:
+    image: memcached:1.6.39-alpine
+    command:
+      - --conn-limit=1024
+      - --memory-limit=64
+      - --threads=2
+    ports:
+      - "11211:11211"
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    ports:
+      - "16686:16686" # UI
+      - "14268:14268" # Collector
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yaml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      # Маппим весь проект внутрь. 
+      # Важно: исключения можно настроить в .dockerignore или здесь, но volume перекрывает COPY
+      - .:/app
+      # Исключаем папку tmp, чтобы air не пытался компилировать сам себя бесконечно
+      - /app/tmp
+    environment:
+      # Переменные берем из .env файла, который лежит в корне
+      # Docker-compose сам подхватит .env, если он есть в той же папке
+      - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-astrobackend}?sslmode=disable
+      - NATS_URL=nats://nats:4222
+      - NATS_HOST=nats 
+      - JAEGER_AGENT_HOST=jaeger
+      - JAEGER_AGENT_PORT=6831
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+
+
+volumes:
+  pgdata-local:
+  nats-data-local:
+  prometheus_data:
+

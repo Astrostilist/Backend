@@ -1,58 +1,74 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"time"
 
 	"astroapi/config"
 
 	_ "github.com/lib/pq"
+	"github.com/pressly/goose/v3"
 )
 
+const migrationsDir = "migrations"
+
+// PostgresDB - тонкая обёртка над *sql.DB, создаётся через New.
+// Глобальной переменной DB больше нет — всё явно прокидывается через зависимости.
 type PostgresDB struct {
 	DB *sql.DB
 }
 
-var DB *PostgresDB
-
-func InitDB(cfg *config.Config) error {
-	// Формируем строку подключения
+// New открывает соединение, делает ping и прогоняет goose-миграции.
+func New(ctx context.Context, cfg *config.Config) (*PostgresDB, error) {
 	connStr := fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBSSLMode,
 	)
 
-	// Подключаемся к базе данных
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
-		return fmt.Errorf("failed to open database connection: %w", err)
+		return nil, fmt.Errorf("open postgres connection: %w", err)
 	}
 
-	// Проверяем подключение
-	if err := db.Ping(); err != nil {
-		return fmt.Errorf("failed to ping database: %w", err)
+	db.SetMaxOpenConns(int(cfg.DBMaxConns))
+	db.SetMaxIdleConns(int(cfg.DBMinConns))
+	db.SetConnMaxLifetime(cfg.DBMaxConnLifetime)
+	db.SetConnMaxIdleTime(cfg.DBMaxConnIdleTime)
+
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
 
-	DB = &PostgresDB{DB: db}
-	log.Printf("Successfully connected to PostgreSQL database '%s' on %s:%s",
-		cfg.DBName, cfg.DBHost, cfg.DBPort)
+	if err := goose.SetDialect("postgres"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set goose dialect: %w", err)
+	}
 
-	return nil
+	if err := goose.Up(db, migrationsDir); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("apply migrations: %w", err)
+	}
+
+	return &PostgresDB{DB: db}, nil
 }
 
-// Close закрывает подключение к базе данных
+// Close закрывает соединение.
 func (p *PostgresDB) Close() error {
-	if p.DB != nil {
-		return p.DB.Close()
+	if p == nil || p.DB == nil {
+		return nil
 	}
-	return nil
+	return p.DB.Close()
 }
 
-// Ping проверяет доступность базы данных
-func (p *PostgresDB) Ping() error {
-	if p.DB == nil {
+// Ping проверяет доступность базы.
+func (p *PostgresDB) Ping(ctx context.Context) error {
+	if p == nil || p.DB == nil {
 		return fmt.Errorf("database connection is nil")
 	}
-	return p.DB.Ping()
+	return p.DB.PingContext(ctx)
 }

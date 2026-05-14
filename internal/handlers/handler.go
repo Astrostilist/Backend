@@ -1,60 +1,67 @@
 package handlers
 
 import (
-	"astroapi/internal/database"
+	"context"
 	"encoding/json"
 	"net/http"
+	"time"
+
+	"astroapi/internal/database"
 )
 
-// Response остается без изменений
+//go:generate mockgen -source=handler.go -destination=mocks/mock_hello.go -package=mocks
+
+// Response — общая обёртка для JSON-ответов сервиса.
 type Response struct {
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
 
-// Создаем интерфейс для сервисного слоя
+// HelloService абстрагирует проверку состояния зависимостей (например, БД).
 type HelloService interface {
-	GetDBStatus() string
+	GetDBStatus(ctx context.Context) string
 }
 
-// Создаем структуру хендлера, которая хранит сервис
+// HelloHandler обслуживает корневой health-подобный эндпоинт.
 type HelloHandler struct {
 	service HelloService
 }
 
-// Конструктор для создания нового хендлера
 func NewHelloHandler(s HelloService) *HelloHandler {
 	return &HelloHandler{service: s}
 }
 
 func (h *HelloHandler) HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
-	dbStatus := h.service.GetDBStatus()
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	dbStatus := h.service.GetDBStatus(ctx)
 
 	w.Header().Set("Content-Type", "application/json")
-
-	response := Response{
-		Message: "Hello world",
-		Data: map[string]any{
-			"database_status": dbStatus,
-		},
-	}
-
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	if err := json.NewEncoder(w).Encode(Response{
+		Message: "Hello world!",
+		Data:    map[string]any{"database_status": dbStatus},
+	}); err != nil {
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
 	}
 }
 
-type RealHelloService struct{}
+// RealHelloService использует реальное соединение с PostgreSQL.
+type RealHelloService struct {
+	db *database.PostgresDB
+}
 
-func (s *RealHelloService) GetDBStatus() string {
-	if database.DB != nil {
-		if err := database.DB.Ping(); err == nil {
-			return "connected"
-		} else {
-			return "disconnected"
-		}
+func NewRealHelloService(db *database.PostgresDB) *RealHelloService {
+	return &RealHelloService{db: db}
+}
+
+func (s *RealHelloService) GetDBStatus(ctx context.Context) string {
+	if s == nil || s.db == nil {
+		return "not initialized"
 	}
-	return "not initialized"
+	if err := s.db.Ping(ctx); err != nil {
+		return "disconnected"
+	}
+	return "connected"
 }

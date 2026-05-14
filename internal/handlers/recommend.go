@@ -1,124 +1,190 @@
 package handlers
 
 import (
-	"astroapi/internal/messaging"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"time"
 
+	"astroapi/internal/alisa"
+	"astroapi/internal/models"
+	"astroapi/internal/requests"
+	"astroapi/internal/resilience"
+	"astroapi/internal/user"
+
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
-// RecommendRequest описывает ожидаемый JSON для получения рекомендаций
-type RecommendRequest struct {
-	UserID   string                 `json:"user_id"`
-	Scenario string                 `json:"scenario"`
-	Context  map[string]interface{} `json:"context,omitempty"`
-	Mode     string                 `json:"mode,omitempty"`
-}
+const (
+	recommendMaxBodyBytes = 1 << 20
+	recommendSyncTimeout  = 5 * time.Second
+	recommendModeSync     = "sync"
+	recommendModeAsync    = "async"
+)
 
-// Создаем глобальный словарь разрешенных сценариев
+// validScenarios — допустимые значения scenario.
 var validScenarios = map[string]bool{
 	"personal_style": true,
 	"perfect_gift":   true,
 }
 
-// Validate проверяет входные данные на соответствие ТЗ
-func (req *RecommendRequest) Validate() map[string]string {
-	errors := make(map[string]string)
-
-	if _, err := uuid.Parse(req.UserID); err != nil {
-		errors["user_id"] = "must be a valid UUID format"
-	}
-
-	if !validScenarios[req.Scenario] {
-		errors["scenario"] = "scenario must be either 'personal_style' or 'perfect_gift'"
-	}
-
-	// Если клиент ничего не передал (пустая строка), ставим режим по умолчанию
-	if req.Mode == "" {
-		req.Mode = "async"
-	} else if req.Mode != "sync" && req.Mode != "async" {
-		// Если клиент передал что-то, кроме sync или async, выдаем ошибку
-		errors["mode"] = "mode must be either 'sync' or 'async'"
-	}
-
-	return errors
+// RecommendRequest — payload POST /api/v1/astro/recommend.
+type RecommendRequest struct {
+	UserID   string         `json:"user_id"`
+	Scenario string         `json:"scenario"`
+	Context  map[string]any `json:"context,omitempty"`
+	Mode     string         `json:"mode,omitempty"`
 }
 
-func RecommendHandler(w http.ResponseWriter, r *http.Request) {
+// Validate проверяет запрос и проставляет Mode=async по умолчанию.
+func (req *RecommendRequest) Validate() map[string]string {
+	errs := make(map[string]string)
+	if _, err := uuid.Parse(req.UserID); err != nil {
+		errs["user_id"] = "must be a valid UUID format"
+	}
+	if !validScenarios[req.Scenario] {
+		errs["scenario"] = "scenario must be either 'personal_style' or 'perfect_gift'"
+	}
+	if req.Mode == "" {
+		req.Mode = recommendModeAsync
+	} else if req.Mode != recommendModeSync && req.Mode != recommendModeAsync {
+		errs["mode"] = "mode must be either 'sync' or 'async'"
+	}
+	return errs
+}
 
-	// Защита от OOM
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+// RecommendHandler обслуживает POST /api/v1/astro/recommend.
+type RecommendHandler struct {
+	publisher    MsgPublisher
+	userRepo     user.Repository
+	rulesRepo    RuleMatcher
+	aiClient     alisa.Generator
+	requestsRepo requests.Repository
+	logger       *zap.Logger
+}
 
-	// Декодирование JSON
+func NewRecommendHandler(
+	publisher MsgPublisher,
+	userRepo user.Repository,
+	rulesRepo RuleMatcher,
+	aiClient alisa.Generator,
+	requestsRepo requests.Repository,
+	logger *zap.Logger,
+) *RecommendHandler {
+	return &RecommendHandler{
+		publisher:    publisher,
+		userRepo:     userRepo,
+		rulesRepo:    rulesRepo,
+		aiClient:     aiClient,
+		requestsRepo: requestsRepo,
+		logger:       logger,
+	}
+}
+
+func (h *RecommendHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, recommendMaxBodyBytes)
+
 	var req RecommendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error": "invalid json format"}`, http.StatusBadRequest)
+		if errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "request body is required")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid json format")
 		return
 	}
 
-	// Валидация
 	if validationErrors := req.Validate(); len(validationErrors) > 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error":   "validation_failed",
 			"details": validationErrors,
-		}); err != nil {
-			http.Error(w, "failed to encode response", http.StatusInternalServerError)
-		}
+		})
 		return
 	}
 
-	// Генерируем ID
 	requestID := uuid.New().String()
 
-	payload, err := json.Marshal(req)
-	if err != nil {
-		http.Error(w, `{"error": "failed to encode payload"}`, http.StatusInternalServerError)
+	if err := h.requestsRepo.Create(r.Context(), requests.Request{
+		RequestID: requestID,
+		UserID:    req.UserID,
+		Scenario:  req.Scenario,
+		Status:    requests.StatusPending,
+	}); err != nil {
+		h.logger.Error("failed to create requests_log entry", zap.Error(err))
+		writeError(w, http.StatusInternalServerError, "failed to create request")
 		return
 	}
 
-	if req.Mode == "async" {
-		if messaging.JS != nil {
-			_, err = messaging.JS.Publish(r.Context(), "astro.events.recommend", payload)
-			if err != nil {
-				http.Error(w, `{"error": "failed to publish event to NATS"}`, http.StatusInternalServerError)
-				return
-			}
-		}
-
-		// Отдаем 202 Accepted
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		if err := json.NewEncoder(w).Encode(map[string]string{
-			"request_id": requestID,
-		}); err != nil {
-			http.Error(w, "failed to encode response", http.StatusInternalServerError)
-		}
+	if req.Mode == recommendModeAsync {
+		h.handleAsync(w, r, requestID, req)
 		return
 	}
+	h.handleSync(w, r, requestID, req)
+}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+func (h *RecommendHandler) handleAsync(w http.ResponseWriter, r *http.Request, requestID string, req RecommendRequest) {
+	payload := recommendPayload{RequestID: requestID, Recommend: req}
+	if err := h.publisher.PublishMessage(r.Context(), models.MsgStreamEvents, models.MsgRecommendSubj, payload); err != nil {
+		h.logger.Error("failed to publish recommend event", zap.Error(err))
+		writeError(w, http.StatusInternalServerError, "failed to publish event")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"request_id": requestID})
+}
+
+func (h *RecommendHandler) handleSync(w http.ResponseWriter, r *http.Request, requestID string, req RecommendRequest) {
+	ctx, cancel := context.WithTimeout(r.Context(), recommendSyncTimeout)
 	defer cancel()
-	select {
-	case <-time.After(2 * time.Second):
-		// Имитация успешного ответа от нейросети через 2 секунды
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"request_id": requestID,
-			"result":     "Здесь будет крутая рекомендация от AlisaAI",
-			"status":     "completed",
-		}); err != nil {
-			// Если вдруг не получилось закодировать, отдаем ошибку сервера
-			http.Error(w, `{"error": "failed to encode response"}`, http.StatusInternalServerError)
-		}
 
-	case <-ctx.Done():
-		http.Error(w, `{"error": "timeout: AI service is taking too long"}`, http.StatusGatewayTimeout)
+	result, err := buildRecommendation(ctx, req, h.userRepo, h.rulesRepo, h.aiClient)
+	if err != nil {
+		h.markFailed(r.Context(), requestID, err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, http.StatusGatewayTimeout, "ai service timeout")
+			return
+		}
+		if errors.Is(err, user.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "user profile not found")
+			return
+		}
+		if resilience.IsServiceUnavailable(err) {
+			writeError(w, http.StatusServiceUnavailable, "service temporarily unavailable")
+			return
+		}
+		h.logger.Error("recommend sync failed", zap.Error(err))
+		writeError(w, http.StatusBadGateway, "failed to build recommendation")
+		return
 	}
+
+	resultJSON, marshalErr := json.Marshal(result)
+	if marshalErr != nil {
+		h.logger.Error("failed to marshal recommendation result", zap.Error(marshalErr))
+		writeError(w, http.StatusInternalServerError, "failed to encode result")
+		return
+	}
+	if err := h.requestsRepo.UpdateStatus(r.Context(), requestID, requests.StatusCompleted, resultJSON, ""); err != nil {
+		h.logger.Warn("failed to update requests_log", zap.Error(err))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"request_id": requestID,
+		"result":     result.Text,
+		"tags":       result.Tags,
+		"status":     requests.StatusCompleted,
+	})
+}
+
+func (h *RecommendHandler) markFailed(ctx context.Context, requestID string, err error) {
+	if updateErr := h.requestsRepo.UpdateStatus(ctx, requestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
+		h.logger.Warn("failed to update requests_log to failed", zap.Error(updateErr))
+	}
+}
+
+// recommendPayload — сообщение в JetStream.
+type recommendPayload struct {
+	RequestID string           `json:"request_id"`
+	Recommend RecommendRequest `json:"recommend"`
 }

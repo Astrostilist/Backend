@@ -121,7 +121,7 @@ func (r *JetStreamRepository) streamToDomainStream(stream jetstream.Stream) *mod
 		Name:         info.Config.Name,
 		Retention:    r.jetStreamToDomainRetention(info.Config.Retention),
 		Subjects:     info.Config.Subjects,
-		MaxConsumers: int(info.Config.MaxConsumers),
+		MaxConsumers: info.Config.MaxConsumers,
 		MaxMessages:  info.Config.MaxMsgs,
 		MaxBytes:     info.Config.MaxBytes,
 		Storage:      r.jetStreamToDomainStorageType(info.Config.Storage),

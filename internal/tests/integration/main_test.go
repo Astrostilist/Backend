@@ -3,13 +3,14 @@
 package integration
 
 import (
+	"os/exec"
 	"astroapi/internal/logger"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"testing"
 	"time"
+	"log"
 
 	"github.com/testcontainers/testcontainers-go"
 	tc "github.com/testcontainers/testcontainers-go"
@@ -30,12 +31,22 @@ type TestEnv struct {
 var testEnv *TestEnv
 
 func TestMain(m *testing.M) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		fmt.Fprintln(os.Stderr, "docker binary not available")
+		os.Exit(0)
+	}
+
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "docker daemon not available")
+		os.Exit(0)
+	}
+
 	ctx := context.Background()
 
 	// 0. Инициализируем логгер
 	logger, err := logger.NewLogger("integration_tests", "debug")
 	if err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+		panic(fmt.Sprintf("Failed to initialize logger: %v", err))
 	}
 	defer func() {
 		if err := logger.Sync(); err != nil {
@@ -46,7 +57,8 @@ func TestMain(m *testing.M) {
 	// 1. Инициализация окружения
 	env, err := setupIntegrationEnv(ctx)
 	if err != nil {
-		logger.Fatal("Failed to setup env", zap.Error(err))
+		fmt.Fprintf(os.Stderr, "Failed to setup env: %v\n", err)
+        os.Exit(1)
 	}
 	testEnv = env
 
@@ -68,8 +80,7 @@ func setupIntegrationEnv(ctx context.Context) (*TestEnv, error) {
 	env := &TestEnv{}
 
 	// --- NATS JetStream ---
-	natsContainer, err := nats.RunContainer(ctx,
-		testcontainers.WithImage("nats:alpine"),
+	natsContainer, err := nats.Run(ctx, "nats:alpine",
 		testcontainers.WithCmd("-js"),
 	)
 	if err != nil {
@@ -84,8 +95,7 @@ func setupIntegrationEnv(ctx context.Context) (*TestEnv, error) {
 	env.NatsURL = natsURL
 
 	// --- PostgreSQL ---
-	postgresContainer, err := postgres.RunContainer(ctx,
-		testcontainers.WithImage("postgres:17-alpine"),
+	postgresContainer, err := postgres.Run(ctx, "postgres:17-alpine",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("user"),
 		postgres.WithPassword("password"),

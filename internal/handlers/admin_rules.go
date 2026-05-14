@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode"
 
-	"astroapi/internal/rules"
+	rules "astroapi/internal/ruleengine"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -16,7 +17,7 @@ import (
 const (
 	defaultRulesLimit   = 50
 	maxRulesLimit       = 200
-	defaultRulePriority = 100
+	defaultRulePriority = 99
 )
 
 type AdminRulesHandler struct {
@@ -24,18 +25,11 @@ type AdminRulesHandler struct {
 }
 
 type adminRuleRequest struct {
-	Name           string         `json:"name"`
-	AstroCondition map[string]any `json:"astro_condition"`
-	ProductTags    []string       `json:"product_tags"`
-	Priority       *int           `json:"priority"`
-	IsActive       *bool          `json:"is_active"`
-}
-
-type adminRulesListResponse struct {
-	Items      []rules.Rule `json:"items"`
-	Limit      int          `json:"limit"`
-	Offset     int          `json:"offset"`
-	TotalCount int          `json:"total_count"`
+	Name           string            `json:"name"`
+	AstroCondition map[string]string `json:"astro_condition"`
+	ProductTags    []string          `json:"product_tags"`
+	Priority       *int              `json:"priority"`
+	IsActive       *bool             `json:"is_active"`
 }
 
 func NewAdminRulesHandler(repository rules.Repository) *AdminRulesHandler {
@@ -47,11 +41,13 @@ func RegisterAdminRulesRoutes(router chi.Router, adminToken string, handler *Adm
 		router.Use(AdminAuthMiddleware(adminToken))
 		router.Get("/", handler.ListRules)
 		router.Post("/", handler.CreateRule)
+		router.Get("/{id}", handler.GetRule)
 		router.Put("/{id}", handler.UpdateRule)
 		router.Delete("/{id}", handler.DeleteRule)
 	})
 }
 
+// ListRules - обрабатывает  get, выдает список правил.
 func (h *AdminRulesHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 	listOptions, err := parseRulesListOptions(r)
 	if err != nil {
@@ -59,7 +55,7 @@ func (h *AdminRulesHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.repository.List(r.Context(), listOptions)
+	result, metadata, err := h.repository.List(r.Context(), listOptions)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch astro rules")
 		return
@@ -67,15 +63,11 @@ func (h *AdminRulesHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Astro rules fetched successfully",
-		Data: adminRulesListResponse{
-			Items:      result.Items,
-			Limit:      listOptions.Limit,
-			Offset:     listOptions.Offset,
-			TotalCount: result.TotalCount,
-		},
+		Data:    map[string]any{"rules": result, "metadata": metadata},
 	})
 }
 
+// CreateRule - обрабатывает POST, создает правило в БД.
 func (h *AdminRulesHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 	payload, err := decodeAdminRuleRequest(r)
 	if err != nil {
@@ -89,15 +81,35 @@ func (h *AdminRulesHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	createdRule, err := h.repository.Create(r.Context(), input)
+	idCreatedRule, err := h.repository.Create(r.Context(), &input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create astro rule")
 		return
 	}
+	result := map[string]any{"id": idCreatedRule.String()}
 
 	writeJSON(w, http.StatusCreated, Response{
 		Message: "Astro rule created successfully",
-		Data:    createdRule,
+		Data:    result,
+	})
+}
+
+func (h *AdminRulesHandler) GetRule(w http.ResponseWriter, r *http.Request) {
+	ruleID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if ruleID == "" {
+		writeError(w, http.StatusBadRequest, "rule id is required")
+		return
+	}
+
+	rule, err := h.repository.Get(r.Context(), ruleID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch astro rules")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, Response{
+		Message: "Astro rules fetched successfully",
+		Data:    map[string]any{"rule": rule},
 	})
 }
 
@@ -120,7 +132,7 @@ func (h *AdminRulesHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updatedRule, err := h.repository.Update(r.Context(), ruleID, input)
+	updatedRule, err := h.repository.Update(r.Context(), ruleID, &input)
 	if err != nil {
 		if errors.Is(err, rules.ErrRuleNotFound) {
 			writeError(w, http.StatusNotFound, "astro rule not found")
@@ -132,7 +144,7 @@ func (h *AdminRulesHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Astro rule updated successfully",
-		Data:    updatedRule,
+		Data:    map[string]any{"id": updatedRule.String()},
 	})
 }
 
@@ -201,10 +213,7 @@ func (r adminRuleRequest) toRuleInput() (rules.RuleInput, error) {
 		return rules.RuleInput{}, errors.New("priority must be greater than or equal to 0")
 	}
 
-	productTags := r.ProductTags
-	if productTags == nil {
-		productTags = []string{}
-	}
+	productTags := normalizeTags(r.ProductTags)
 
 	isActive := true
 	if r.IsActive != nil {
@@ -220,23 +229,24 @@ func (r adminRuleRequest) toRuleInput() (rules.RuleInput, error) {
 	}, nil
 }
 
+// parseRulesListOptions - парсинг параметров запроса.
 func parseRulesListOptions(r *http.Request) (rules.ListOptions, error) {
 	query := r.URL.Query()
 
 	limit := defaultRulesLimit
-	if rawLimit := strings.TrimSpace(query.Get("limit")); rawLimit != "" {
+	if rawLimit := strings.TrimSpace(query.Get("page_size")); rawLimit != "" {
 		parsedLimit, err := strconv.Atoi(rawLimit)
 		if err != nil || parsedLimit < 1 || parsedLimit > maxRulesLimit {
-			return rules.ListOptions{}, errors.New("limit must be an integer between 1 and 200")
+			return rules.ListOptions{}, errors.New("page_size (limit) must be an integer between 1 and 200")
 		}
 		limit = parsedLimit
 	}
 
 	offset := 0
-	if rawOffset := strings.TrimSpace(query.Get("offset")); rawOffset != "" {
+	if rawOffset := strings.TrimSpace(query.Get("page")); rawOffset != "" {
 		parsedOffset, err := strconv.Atoi(rawOffset)
 		if err != nil || parsedOffset < 0 {
-			return rules.ListOptions{}, errors.New("offset must be an integer greater than or equal to 0")
+			return rules.ListOptions{}, errors.New("page (offset) must be an integer greater than or equal to 0")
 		}
 		offset = parsedOffset
 	}
@@ -255,4 +265,22 @@ func parseRulesListOptions(r *http.Request) (rules.ListOptions, error) {
 		Limit:    limit,
 		Offset:   offset,
 	}, nil
+}
+
+// normalizeTags приводит теги к lowercase, убирает пробелы и дубли.
+// Гарантирует совпадение тегов из правил с тегами товаров из RetailCRM.
+func normalizeTags(tags []string) []string {
+	seen := make(map[string]struct{}, len(tags))
+	result := make([]string, 0, len(tags))
+	for _, t := range tags {
+		t = strings.TrimFunc(strings.ToLower(t), unicode.IsSpace)
+		if t == "" {
+			continue
+		}
+		if _, ok := seen[t]; !ok {
+			seen[t] = struct{}{}
+			result = append(result, t)
+		}
+	}
+	return result
 }
