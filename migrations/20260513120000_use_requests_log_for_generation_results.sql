@@ -1,4 +1,5 @@
 -- +goose Up
+-- +goose StatementBegin
 ALTER TABLE requests_log
     DROP CONSTRAINT IF EXISTS chk_requests_log_status;
 
@@ -21,13 +22,15 @@ BEGIN
         FROM generation_results AS gr
         WHERE rl.request_id = gr.request_id;
     END IF;
-END $$;
+END;
+$$;
 
 ALTER TABLE requests_log
     ADD CONSTRAINT chk_requests_log_status
     CHECK (status IN ('pending', 'processing', 'completed', 'failed'));
 
 DROP TABLE IF EXISTS generation_results;
+-- +goose StatementEnd
 
 -- +goose Down
 CREATE TABLE IF NOT EXISTS generation_results (
