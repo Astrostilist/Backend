@@ -492,22 +492,17 @@ paths:
           in: query
           schema:
             type: string
-            enum: [accepted, processing, completed, failed]
-        - name: date_from
+            enum: [pending, processing, completed, failed]
+        - name: from
           in: query
           schema:
             type: string
             format: date-time
-        - name: date_to
+        - name: to
           in: query
           schema:
             type: string
             format: date-time
-        - name: page
-          in: query
-          schema:
-            type: integer
-            default: 1
         - name: limit
           in: query
           schema:
@@ -521,6 +516,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminLogsListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -961,7 +958,7 @@ components:
           type: string
         status:
           type: string
-          enum: [accepted, processing, completed, failed]
+          enum: [pending, processing, completed, failed]
         attempt_count:
           type: integer
         error_reason:
@@ -976,6 +973,35 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    AdminLogEntry:
+      type: object
+      required:
+        - request_id
+        - user_id
+        - status
+        - error_message
+        - created_at
+        - completed_at
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        error_message:
+          type: string
+          maxLength: 500
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
 
     RequestLogEnvelope:
       allOf:
@@ -996,10 +1022,6 @@ components:
                 items:
                   type: array
                   items:
-                    $ref: "#/components/schemas/RequestLog"
-                total:
-                  type: integer
-                page:
-                  type: integer
-                limit:
+                    $ref: "#/components/schemas/AdminLogEntry"
+                total_count:
                   type: integer
