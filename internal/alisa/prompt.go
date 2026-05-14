@@ -30,12 +30,12 @@ type promptData struct {
 	Context      map[string]any
 }
 
-func BuildPrompt(scenario string, astroProfile AstroProfile, context map[string]any) string {
+func BuildPrompt(scenario string, astroProfile AstroProfile, context map[string]any, logger *zap.Logger) string {
 	if context == nil {
 		context = map[string]any{}
 	}
 
-	tmpl := loadPromptTemplates()
+	tmpl := loadPromptTemplates(logger)
 	if tmpl == nil {
 		zap.L().Error("prompt templates are not loaded")
 		return ""
@@ -43,7 +43,7 @@ func BuildPrompt(scenario string, astroProfile AstroProfile, context map[string]
 
 	templateName := templateNameByScenario(scenario)
 	if templateName == "" {
-		zap.L().Warn("unknown AlisaAI prompt scenario", zap.String("scenario", scenario))
+		logger.Error("unknown AlisaAI prompt scenario", zap.String("scenario", scenario))
 		return ""
 	}
 
@@ -54,17 +54,17 @@ func BuildPrompt(scenario string, astroProfile AstroProfile, context map[string]
 		Context:      context,
 	})
 	if err != nil {
-		zap.L().Error("failed to build AlisaAI prompt", zap.String("scenario", scenario), zap.Error(err))
+		logger.Error("failed to build AlisaAI prompt", zap.String("scenario", scenario), zap.Error(err))
 		return ""
 	}
 
 	prompt := strings.TrimSpace(result.String())
-	zap.L().Debug("AlisaAI prompt built", zap.String("scenario", scenario), zap.String("prompt", prompt))
+	logger.Debug("AlisaAI prompt built", zap.String("scenario", scenario), zap.String("prompt", prompt))
 
 	return prompt
 }
 
-func loadPromptTemplates() *template.Template {
+func loadPromptTemplates(logger *zap.Logger) *template.Template {
 	promptOnce.Do(func() {
 		funcMap := template.FuncMap{
 			"toJSON": func(v any) string {
@@ -79,7 +79,7 @@ func loadPromptTemplates() *template.Template {
 		promptTemplates = template.New("prompts").Funcs(funcMap)
 		parsedTemplates, err := promptTemplates.ParseFS(promptFS, "prompts/*.tmpl")
 		if err != nil {
-			zap.L().Error("failed to parse AlisaAI prompt templates", zap.Error(err))
+			logger.Error("failed to parse AlisaAI prompt templates", zap.Error(err))
 			promptTemplates = nil
 		} else {
 			promptTemplates = parsedTemplates

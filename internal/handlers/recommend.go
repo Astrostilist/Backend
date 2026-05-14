@@ -139,7 +139,7 @@ func (h *RecommendHandler) handleSync(w http.ResponseWriter, r *http.Request, re
 	ctx, cancel := context.WithTimeout(r.Context(), recommendSyncTimeout)
 	defer cancel()
 
-	result, err := buildRecommendation(ctx, req, h.userRepo, h.rulesRepo, h.aiClient)
+	result, err := buildRecommendation(ctx, req, h.userRepo, h.rulesRepo, h.aiClient, h.logger)
 	if err != nil {
 		h.markFailed(r.Context(), requestID, err)
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -166,7 +166,7 @@ func (h *RecommendHandler) handleSync(w http.ResponseWriter, r *http.Request, re
 		return
 	}
 	if err := h.requestsRepo.UpdateStatus(r.Context(), requestID, requests.StatusCompleted, resultJSON, ""); err != nil {
-		h.logger.Warn("failed to update requests_log", zap.Error(err))
+		h.logger.Error("failed to update requests_log", zap.Error(err))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

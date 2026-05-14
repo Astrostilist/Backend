@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"astroapi/internal/alisa"
 	"astroapi/internal/requests"
@@ -31,8 +32,7 @@ func buildRecommendation(
 	req RecommendRequest,
 	userRepo user.Repository,
 	rulesRepo RuleMatcher,
-	ai alisa.Generator,
-) (RecommendationResult, error) {
+	ai alisa.Generator, logger *zap.Logger) (RecommendationResult, error) {
 	u, err := userRepo.Get(ctx, req.UserID)
 	if err != nil {
 		return RecommendationResult{}, err
@@ -52,7 +52,7 @@ func buildRecommendation(
 	for k, v := range req.Context {
 		enrichedCtx[k] = v
 	}
-	prompt := alisa.BuildPrompt(req.Scenario, astroProfile, enrichedCtx)
+	prompt := alisa.BuildPrompt(req.Scenario, astroProfile, enrichedCtx, logger)
 	if prompt == "" {
 		return RecommendationResult{}, fmt.Errorf("validation: cannot build prompt for scenario %q", req.Scenario)
 	}
@@ -100,11 +100,12 @@ func beginRequestProcessing(
 		return false, nil
 	}
 	if req.Status != requests.StatusPending {
-		logger.Debug("request is not pending, skip processing",
+		logger.Info("request is not pending, skip processing",
 			zap.String("request_id", requestID), zap.String("status", req.Status))
 		return false, nil
 	}
 
+	// TODO: вызов astro API
 	started, err := repo.StartProcessing(ctx, requestID)
 	if err != nil {
 		return false, err
@@ -118,7 +119,7 @@ func beginRequestProcessing(
 			logger.Info("skipping duplicate request_id", zap.String("request_id", requestID))
 			return false, nil
 		}
-		logger.Debug("request was locked by another worker",
+		logger.Info("request was locked by another worker",
 			zap.String("request_id", requestID), zap.String("status", current.Status))
 		return false, nil
 	}
@@ -138,6 +139,9 @@ func NewProfileProcessor(userRepo user.Repository, requestsRepo requests.Reposit
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
+
+	time.Sleep(15 * time.Second) // TODO: test
+
 	var msg profilePayload
 	if err := json.Unmarshal(payload, &msg); err != nil {
 		return fmt.Errorf("validation: invalid profile payload: %w", err)
@@ -170,14 +174,14 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 	}
 
 	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, nil, ""); err != nil {
-		p.logger.Warn("failed to mark profile request as completed", zap.Error(err))
+		p.logger.Error("failed to mark profile request as completed", zap.Error(err))
 	}
 	return nil
 }
 
 func (p *ProfileProcessor) markFailed(ctx context.Context, requestID string, err error) {
 	if updateErr := p.requestsRepo.UpdateStatus(ctx, requestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
-		p.logger.Warn("failed to mark profile request as failed", zap.Error(updateErr))
+		p.logger.Error("failed to mark profile request as failed", zap.Error(updateErr))
 	}
 }
 
@@ -196,8 +200,7 @@ func NewRecommendProcessor(
 	requestsRepo requests.Repository,
 	rulesRepo RuleMatcher,
 	aiClient alisa.Generator,
-	logger *zap.Logger,
-) *RecommendProcessor {
+	logger *zap.Logger) *RecommendProcessor {
 	return &RecommendProcessor{
 		userRepo:     userRepo,
 		requestsRepo: requestsRepo,
@@ -221,10 +224,10 @@ func (p *RecommendProcessor) Handle(ctx context.Context, payload []byte) error {
 		return nil
 	}
 
-	result, err := buildRecommendation(ctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient)
+	result, err := buildRecommendation(ctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient, p.logger)
 	if err != nil {
 		if updateErr := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
-			p.logger.Warn("failed to mark recommend request as failed", zap.Error(updateErr))
+			p.logger.Error("failed to mark recommend request as failed", zap.Error(updateErr))
 		}
 		return err
 	}
@@ -234,7 +237,7 @@ func (p *RecommendProcessor) Handle(ctx context.Context, payload []byte) error {
 		return fmt.Errorf("marshal recommendation: %w", err)
 	}
 	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
-		p.logger.Warn("failed to mark recommend request as completed", zap.Error(err))
+		p.logger.Error("failed to mark recommend request as completed", zap.Error(err))
 	}
 	p.logger.Info("recommendation generated",
 		zap.String("request_id", msg.RequestID),
