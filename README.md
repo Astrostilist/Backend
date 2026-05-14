@@ -74,3 +74,34 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 curl http://localhost:8080/api/v1/admin/rules/ \
   -H "Authorization: Bearer <access_token>"
 ```
+
+### AUTH-03: Client API Bot API Key
+
+Клиентские эндпоинты Telegram-бота защищены статическим ключом из переменной окружения:
+
+```env
+BOT_API_KEY=__CHANGEME_BOT_API_KEY__
+```
+
+Защищенные маршруты:
+
+* `POST /api/v1/astro/profile`
+* `POST /api/v1/astro/recommend`
+* `POST /api/v1/feedback`
+
+Каждый запрос от Telegram-бота должен передавать заголовок:
+
+```http
+Authorization: Bearer <bot_api_key>
+```
+
+Пример:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/astro/profile \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer __CHANGEME_BOT_API_KEY__' \
+  -d '{"user_id":"...","birth_date":"1990-01-01","birth_place":"Moscow","consent_given":true}'
+```
+
+Если `BOT_API_KEY` не задан в окружении либо заголовок отсутствует/неверен, клиентские эндпоинты возвращают `401 Unauthorized`.

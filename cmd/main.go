@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -24,6 +25,7 @@ import (
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
 	"astroapi/internal/products"
+	feedbackrepo "astroapi/internal/repositories"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
 	"astroapi/internal/usecases"
@@ -33,7 +35,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nats-io/nats.go/jetstream"
-	"github.com/pressly/goose/v3"
 	"go.uber.org/zap"
 )
 
@@ -48,7 +49,8 @@ const (
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatalf("fatal: %v", err)
+		log.Printf("fatal: %v", err)
+		os.Exit(1)
 	}
 }
 
@@ -64,38 +66,43 @@ func run() error {
 		log.Println("warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
 	}
 
+	if cfg.BotAPIKey == "" {
+		log.Println("warning: BOT_API_KEY is not set, client endpoints will reject all requests")
+	}
+
 	zapLogger, err := logger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		if syncErr := zapLogger.Sync(); syncErr != nil {
 			log.Printf("failed to sync logger: %v", syncErr)
 		}
 	}()
+
 	metrics.Initialize(cfg)
+	metricsReporter := metrics.CircuitBreakerReporter{}
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 
-	// 1. Database
 	db, err := database.New(rootCtx, cfg)
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		if closeErr := db.Close(); closeErr != nil {
 			zapLogger.Error("failed to close database", zap.Error(closeErr))
 		}
 	}()
 
-	runMigrations(db, zapLogger)
-
-	// 2. NATS + JetStream
 	natsConn, err := natsinfra.InitNATS(rootCtx, zapLogger, cfg)
 	if err != nil {
 		return err
 	}
+
 	defer natsConn.DrainNATS()
 
 	js, err := jetstream.New(natsConn.Conn)
@@ -114,7 +121,6 @@ func run() error {
 
 	publisher := natsinfra.NewMessagePublisher(jsAdapter)
 
-	// 3. Repositories
 	userRepo := user.NewPostgresRepository(db.DB, encryptionKey)
 	requestsRepo := requests.NewPostgresRepository(db.DB)
 	adminLogsRepo := adminlogs.NewPostgresRepository(db.DB)
@@ -125,11 +131,18 @@ func run() error {
 	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
-	// 4. AI client
-	aiClient := alisa.NewClientWithOptions(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModelURL,
-		alisa.ClientOptions{MaxRetries: 3})
 
-	// 5. Message router + processors (consumers)
+	aiClient := alisa.NewClientWithOptions(
+		cfg.AIBaseURL,
+		cfg.AIAPIKey,
+		cfg.AIModelURL,
+		alisa.ClientOptions{
+			Logger:     zapLogger,
+			Metrics:    metricsReporter,
+			MaxRetries: 3,
+		},
+	)
+
 	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, zapLogger)
 	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, zapLogger)
 
@@ -141,8 +154,7 @@ func run() error {
 
 	var wg sync.WaitGroup
 
-	wg.Go(func() {
-		defer wg.Done()
+	startWorker(&wg, func() {
 		if consumeErr := consumer.ConsumeWithHandler(
 			rootCtx,
 			models.MsgStreamEvents,
@@ -153,11 +165,11 @@ func run() error {
 		); consumeErr != nil {
 			zapLogger.Error("profile worker failed", zap.Error(consumeErr))
 		}
+
 		<-rootCtx.Done()
 	})
 
-	wg.Go(func() {
-		defer wg.Done()
+	startWorker(&wg, func() {
 		if consumeErr := consumer.ConsumeWithHandler(
 			rootCtx,
 			models.MsgStreamEvents,
@@ -168,11 +180,11 @@ func run() error {
 		); consumeErr != nil {
 			zapLogger.Error("recommend worker failed", zap.Error(consumeErr))
 		}
+
 		<-rootCtx.Done()
 	})
 
-	wg.Go(func() {
-		defer wg.Done()
+	startWorker(&wg, func() {
 		natsinfra.StartLagMonitor(rootCtx, jsAdapter)
 		<-rootCtx.Done()
 	})
@@ -184,23 +196,30 @@ func run() error {
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
 	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
 	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
+	feedbackHandler := handlers.NewFeedbackHandler(feedbackrepo.NewFeedbackRepository(db.DB))
 
-	dlqreader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
-	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqreader, zapLogger)
+	dlqReader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
+	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqReader, zapLogger)
 
-	// Настраиваем роутер chi и middleware (единый блок)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(astromidware.RequestMetricsMiddleware())
 	r.Use(astromidware.RequestLogger(zapLogger))
-
 	r.Use(middleware.Recoverer)
 
 	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
-	r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
-	r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
+
+	r.Group(func(r chi.Router) {
+		r.Use(handlers.ClientAuthMiddleware(cfg.BotAPIKey))
+		r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
+		r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
+		r.Post("/api/v1/feedback", feedbackHandler.CreateFeedback)
+		r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
+	})
+
 	r.Post("/api/v1/auth/login", authHandler.Login)
 	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
+
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
 	handlers.RegisterAdminLogsRoutes(r, cfg.AdminToken, adminLogsHandler)
@@ -209,7 +228,7 @@ func run() error {
 		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))
 		r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
 	})
-	// Observability Routes
+
 	r.Handle("/metrics", metrics.NewHandler())
 
 	srv := &http.Server{
@@ -221,11 +240,14 @@ func run() error {
 	}
 
 	serverErr := make(chan error, 1)
+
 	go func() {
 		zapLogger.Info("app starting", zap.String("addr", srv.Addr))
+
 		if listenErr := srv.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
 			serverErr <- listenErr
 		}
+
 		close(serverErr)
 	}()
 
@@ -249,20 +271,34 @@ func run() error {
 	}
 
 	rootCancel()
-	wg.Wait()
+
+	done := make(chan struct{})
+
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		zapLogger.Info("all workers stopped")
+	case <-time.After(15 * time.Second):
+		zapLogger.Warn("timeout waiting workers shutdown")
+	}
 
 	zapLogger.Info("server exited")
+
 	return nil
 }
 
-func runMigrations(db *database.PostgresDB, zapLogger *zap.Logger) {
-	if err := goose.SetDialect("postgres"); err != nil {
-		log.Fatal("Failed to set goose dialect:", err)
-	}
-	if err := goose.Up(db.DB, "./migrations"); err != nil {
-		log.Fatal("Failed to apply migrations:", err)
-	}
-	zapLogger.Info("Migrations applied")
+// All workers should respect root context cancellation.
+func startWorker(wg *sync.WaitGroup, fn func()) {
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		fn()
+	}()
 }
 
 func decodeEncryptionKey(encoded string) ([]byte, error) {
@@ -270,7 +306,16 @@ func decodeEncryptionKey(encoded string) ([]byte, error) {
 		return nil, errors.New("ENCRYPTION_KEY is not set")
 	}
 
-	key, err := base64.StdEncoding.DecodeString(encoded)
+	key, err := func() ([]byte, error) {
+		clean := strings.TrimSpace(encoded)
+
+		decoded, decodeErr := base64.StdEncoding.DecodeString(clean)
+		if decodeErr == nil {
+			return decoded, nil
+		}
+
+		return base64.RawStdEncoding.DecodeString(clean)
+	}()
 	if err != nil {
 		return nil, errors.New("ENCRYPTION_KEY must be valid base64")
 	}
