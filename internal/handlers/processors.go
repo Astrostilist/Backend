@@ -100,6 +100,9 @@ func beginRequestProcessing(
 		return false, nil
 	}
 	if req.Status != requests.StatusPending {
+		// TODO:
+		// разобраться с процессом. Обработчик должен либо обрабатывать запрос до состояния completed,
+		// либо возвращать ошибку. Иначе у нас и запрос не обработан и сообщение из очереди удалено
 		return false, fmt.Errorf("request is not pending, skip processing")
 		//logger.Info("request is not pending, skip processing",
 		//	zap.String("request_id", requestID), zap.String("status", req.Status))

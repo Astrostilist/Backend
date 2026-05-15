@@ -42,7 +42,6 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 
 	consumerCtx, err := consumer.Consume(
 		func(msg jetstream.Msg) {
-			time.Sleep(15 * time.Second) // TODO: test
 			msgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			c.sm.logger.Info("GOT MESSAGE")
