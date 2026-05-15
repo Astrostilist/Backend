@@ -3,16 +3,9 @@ package handlers
 import (
 	"astroapi/internal/requests"
 	"context"
-
-	"github.com/google/uuid"
 )
 
 var validUserID = "123e4567-e89b-12d3-a456-426614174000"
-
-func isValidUUID(u string) bool {
-	_, err := uuid.Parse(u)
-	return err == nil
-}
 
 type mockRequestsRepo struct {
 	requests.Repository

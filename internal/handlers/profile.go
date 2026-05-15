@@ -23,7 +23,6 @@ type ProfileRequest struct {
 	ConsentGiven bool   `json:"consent_given"`
 }
 
-// ЭТОГО НЕ ХВАТАЛО: структура для воркера
 type profilePayload struct {
 	RequestID string         `json:"request_id"`
 	Profile   ProfileRequest `json:"profile"`
@@ -49,12 +48,16 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requestID := uuid.New().String()
-	h.requestsRepo.Create(r.Context(), requests.Request{
+	if err := h.requestsRepo.Create(r.Context(), requests.Request{
 		RequestID: requestID,
 		UserID:    req.UserID,
 		Scenario:  profileScenarioName,
 		Status:    requests.StatusPending,
-	})
+	}); err != nil {
+		h.logger.Error("failed to create request", zap.Error(err))
+		h.sendResponse(w, http.StatusInternalServerError, "db_error", "ошибка базы данных")
+		return
+	}
 
 	if err := h.uc.Execute(r.Context(), usecases.ProcessPersonalDataInput{
 		PersonalData: domain.PersonalData{UserID: req.UserID, DOB: req.BirthDate, ConsentGiven: req.ConsentGiven},
@@ -63,33 +66,34 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Отправляем в очередь именно profilePayload
 	payload := profilePayload{RequestID: requestID, Profile: req}
-	_ = h.publisher.PublishMessage(r.Context(), models.MsgStreamEvents, models.MsgProfileSubj, payload)
+	if err := h.publisher.PublishMessage(r.Context(), models.MsgStreamEvents, models.MsgProfileSubj, payload); err != nil {
+		h.logger.Error("failed to publish profile", zap.Error(err))
+	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"request_id": requestID,
 		"status":     "profile_created",
-	})
+	}); err != nil {
+		h.logger.Error("failed to encode response", zap.Error(err))
+	}
 }
 
 func (h *ProfileHandler) sendResponse(w http.ResponseWriter, code int, msg, errStr string) {
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"message": msg, "error": errStr})
+	if err := json.NewEncoder(w).Encode(map[string]string{"message": msg, "error": errStr}); err != nil {
+		h.logger.Error("failed to encode error response", zap.Error(err))
+	}
 }
 
 func (req *ProfileRequest) Validate() map[string]string {
 	errs := make(map[string]string)
-
 	if _, err := uuid.Parse(req.UserID); err != nil {
 		errs["user_id"] = "некорректный формат UUID"
 	}
-
 	if req.BirthDate == "" {
 		errs["birth_date"] = "дата рождения обязательна"
 	}
-
-	// Если карта пустая, len(errs) будет 0, и воркер поймет, что ошибок нет
 	return errs
 }

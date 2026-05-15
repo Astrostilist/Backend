@@ -7,13 +7,12 @@ import (
 	"net/http"
 
 	"astroapi/internal/requests"
-	"astroapi/internal/user" // Добавляем импорт пакета user
+	"astroapi/internal/user"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
-// UserRepo должен точно соответствовать реализации в пакете user
 type UserRepo interface {
 	Get(ctx context.Context, userID string) (user.User, error)
 }
@@ -61,7 +60,6 @@ func NewRecommendHandler(
 	}
 }
 
-// Переименовываем HandleRecommend в Handle, так как тесты вызывают именно h.Handle
 func (h *RecommendHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var req RecommendRequest
@@ -76,12 +74,16 @@ func (h *RecommendHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requestID := uuid.New().String()
-	_ = h.requestsRepo.Create(r.Context(), requests.Request{
+	if err := h.requestsRepo.Create(r.Context(), requests.Request{
 		RequestID: requestID,
 		UserID:    req.UserID,
 		Scenario:  req.Scenario,
 		Status:    requests.StatusPending,
-	})
+	}); err != nil {
+		h.logger.Error("db error", zap.Error(err))
+		h.sendResponse(w, http.StatusInternalServerError, "db_error", "ошибка БД")
+		return
+	}
 
 	payload := recommendPayload{RequestID: requestID, Recommend: req}
 	if err := h.publisher.PublishMessage(r.Context(), models.MsgStreamEvents, models.MsgRecommendSubj, payload); err != nil {
@@ -91,14 +93,18 @@ func (h *RecommendHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"request_id":             requestID,
 		"status":                 "pending",
 		"estimated_time_seconds": 30,
-	})
+	}); err != nil {
+		h.logger.Error("failed to encode response", zap.Error(err))
+	}
 }
 
 func (h *RecommendHandler) sendResponse(w http.ResponseWriter, code int, msg, errStr string) {
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"message": msg, "error": errStr})
+	if err := json.NewEncoder(w).Encode(map[string]string{"message": msg, "error": errStr}); err != nil {
+		h.logger.Error("failed to encode error response", zap.Error(err))
+	}
 }
