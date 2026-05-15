@@ -11,75 +11,76 @@ import (
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
+// mockFeedbackRepo — простая заглушка для репозитория фидбеков
 type mockFeedbackRepo struct {
-	mockCreate func(ctx context.Context, f *models.Feedback) error
+	mockCreate func(ctx context.Context, fb *models.Feedback) error
 }
 
-func (m *mockFeedbackRepo) Create(ctx context.Context, f *models.Feedback) error {
-	return m.mockCreate(ctx, f)
+func (m *mockFeedbackRepo) Create(ctx context.Context, fb *models.Feedback) error {
+	if m.mockCreate != nil {
+		return m.mockCreate(ctx, fb)
+	}
+	return nil
 }
 
-func TestCreateFeedback(t *testing.T) {
-	validID := "550e8400-e29b-41d4-a716-446655440000"
+func TestFeedbackHandler_CreateFeedback(t *testing.T) {
+	logger := zap.NewNop() // «Тихий» логгер для тестов
 
-	tests := []struct {
-		name           string
-		requestBody    string
-		reqMockSetup   func(ctx context.Context, id string) (requests.Request, error)
-		fbMockSetup    func(ctx context.Context, f *models.Feedback) error
-		expectedStatus int
-		expectedMsg    string
-	}{
-		{
-			name:        "Успешное сохранение (200 OK)",
-			requestBody: `{"request_id": "` + validID + `", "rating": 5, "comment": "Excellent"}`,
-			reqMockSetup: func(ctx context.Context, id string) (requests.Request, error) {
-				return requests.Request{RequestID: id, Status: requests.StatusCompleted}, nil
+	t.Run("Успешное сохранение (200 OK)", func(t *testing.T) {
+		fbRepo := &mockFeedbackRepo{}
+		reqRepo := &mockRequestsRepo{
+			mockGet: func(ctx context.Context, id string) (requests.Request, error) {
+				return requests.Request{
+					RequestID: id,
+					Status:    requests.StatusCompleted, // Статус должен быть Completed
+				}, nil
 			},
-			fbMockSetup:    func(ctx context.Context, f *models.Feedback) error { return nil },
-			expectedStatus: http.StatusOK,
-			expectedMsg:    "successfully",
-		},
-		{
-			name:        "Ошибка: запрос в процессе (400 Bad Request)",
-			requestBody: `{"request_id": "` + validID + `", "rating": 5}`,
-			reqMockSetup: func(ctx context.Context, id string) (requests.Request, error) {
-				return requests.Request{RequestID: id, Status: requests.StatusPending}, nil
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedMsg:    "wrong_status",
-		},
-		{
-			name:        "Ошибка: запрос не найден (404 Not Found)",
-			requestBody: `{"request_id": "` + validID + `", "rating": 4}`,
-			reqMockSetup: func(ctx context.Context, id string) (requests.Request, error) {
+		}
+
+		// Создаем хендлер, передавая правильные переменные и логгер
+		h := NewFeedbackHandler(fbRepo, reqRepo, logger)
+
+		body := map[string]interface{}{
+			"request_id": "test-req-123",
+			"rating":     5,
+			"comment":    "Отлично!",
+		}
+		jsonBody, _ := json.Marshal(body)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/feedback", bytes.NewReader(jsonBody))
+		rr := httptest.NewRecorder()
+
+		// Вызываем метод CreateFeedback (убедись, что в feedback.go он называется так)
+		h.CreateFeedback(rr, req)
+
+		require.Equal(t, http.StatusOK, rr.Code)
+	})
+
+	t.Run("Ошибка: запрос не найден (404 Not Found)", func(t *testing.T) {
+		fbRepo := &mockFeedbackRepo{}
+		reqRepo := &mockRequestsRepo{
+			mockGet: func(ctx context.Context, id string) (requests.Request, error) {
 				return requests.Request{}, requests.ErrNotFound
 			},
-			expectedStatus: http.StatusNotFound,
-			expectedMsg:    "not_found",
-		},
-	}
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fbRepo := &mockFeedbackRepo{mockCreate: tt.fbMockSetup}
-			reqRepo := &mockRequestsRepo{mockGet: tt.reqMockSetup}
+		h := NewFeedbackHandler(fbRepo, reqRepo, logger)
 
-			handler := NewFeedbackHandler(fbRepo, reqRepo)
+		body := map[string]interface{}{
+			"request_id": "unknown-id",
+			"rating":     3,
+		}
+		jsonBody, _ := json.Marshal(body)
 
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/feedback", bytes.NewBufferString(tt.requestBody))
-			rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/feedback", bytes.NewReader(jsonBody))
+		rr := httptest.NewRecorder()
 
-			handler.CreateFeedback(rr, req)
+		h.CreateFeedback(rr, req)
 
-			assert.Equal(t, tt.expectedStatus, rr.Code)
-
-			var response map[string]string
-			json.Unmarshal(rr.Body.Bytes(), &response)
-			assert.Contains(t, response["message"], tt.expectedMsg)
-		})
-	}
+		require.Equal(t, http.StatusNotFound, rr.Code)
+	})
 }

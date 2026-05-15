@@ -272,12 +272,11 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 
 	profileProcessor := NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, logger)
 	router := NewMsgRouter(logger)
-	router.Register(models.MsgProfileSubj, profileProcessor)
+	router.Register(models.MsgRecommendSubj, profileProcessor)
 	consumer := natsinfra.NewMessageConsumer(adapter)
-	require.NoError(t, consumer.ConsumeWithHandler(ctx, models.MsgStreamEvents, models.MsgRecommendWrk,
-		func(c context.Context, msg jetstream.Msg) error {
-			return router.Dispatch(c, msg.Subject(), msg.Data())
-		}))
+	require.NoError(t, consumer.ConsumeWithHandler(ctx, models.MsgStreamEvents, models.MsgRecommendWrk, func(c context.Context, msg jetstream.Msg) error {
+		return router.Dispatch(c, msg.Subject(), msg.Data())
+	}))
 
 	h := NewRecommendHandler(publisher, userRepo, rulesRepo, ai, reqRepo, logger)
 	body, _ := json.Marshal(map[string]any{
