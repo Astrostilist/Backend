@@ -104,9 +104,6 @@ func beginRequestProcessing(
 		// разобраться с процессом. Обработчик должен либо обрабатывать запрос до состояния completed,
 		// либо возвращать ошибку. Иначе у нас и запрос не обработан и сообщение из очереди удалено
 		return false, fmt.Errorf("request is not pending, skip processing")
-		//logger.Info("request is not pending, skip processing",
-		//	zap.String("request_id", requestID), zap.String("status", req.Status))
-		//return false, nil
 	}
 
 	started, err := repo.StartProcessing(ctx, requestID)
@@ -135,13 +132,13 @@ func beginRequestProcessing(
 type ProfileProcessor struct {
 	userRepo     user.Repository
 	requestsRepo requests.Repository
-	astroproc    astroproc.AstroProc
+	astroprc     astroproc.AstroProc
 	logger       *zap.Logger
 }
 
 func NewProfileProcessor(userRepo user.Repository, requestsRepo requests.Repository,
-	astroproc astroproc.AstroProc, logger *zap.Logger) *ProfileProcessor {
-	return &ProfileProcessor{userRepo: userRepo, requestsRepo: requestsRepo, astroproc: astroproc, logger: logger}
+	astroprc astroproc.AstroProc, logger *zap.Logger) *ProfileProcessor {
+	return &ProfileProcessor{userRepo: userRepo, requestsRepo: requestsRepo, astroprc: astroprc, logger: logger}
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
@@ -164,9 +161,9 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 
 	// TODO: get astroprofile from cache or astro API call instead of user save
 	// user had saved in (h *ProfileHandler) HandleProfile
-	profile, err := p.astroproc.GetAstroProfile(ctx, msg.Profile.UserID)
+	profile, err := p.astroprc.GetAstroProfile(ctx, msg.Profile.UserID)
 	if err != nil {
-		return fmt.Errorf("failed to get astro profile: %v", err)
+		return fmt.Errorf("failed to get astro profile: %w", err)
 	}
 
 	p.logger.Info("got astro profile", zap.String("userID", msg.Profile.UserID), zap.Any("data", profile))
@@ -174,31 +171,8 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, nil, ""); err != nil {
 		p.logger.Error("failed to mark profile request as completed", zap.Error(err))
 	}
-	/*// consent_given=false: дата рождения не сохраняется в БД (GDPR / ФЗ-152).
-	if msg.Profile.ConsentGiven {
-		if err := p.userRepo.Save(ctx, user.User{
-			UserID:       msg.Profile.UserID,
-			BirthDate:    msg.Profile.BirthDate,
-			ConsentGiven: msg.Profile.ConsentGiven,
-		}); err != nil {
-			p.markFailed(ctx, msg.RequestID, err)
-			return err
-		}
-		p.logger.Info("profile saved", zap.String("request_id", msg.RequestID), zap.String("user_id", msg.Profile.UserID))
-	} else {
-		p.logger.Info("profile skipped: no consent", zap.String("request_id", msg.RequestID), zap.String("user_id", msg.Profile.UserID))
-	}
 
-	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, nil, ""); err != nil {
-		p.logger.Error("failed to mark profile request as completed", zap.Error(err))
-	}*/
 	return nil
-}
-
-func (p *ProfileProcessor) markFailed(ctx context.Context, requestID string, err error) {
-	if updateErr := p.requestsRepo.UpdateStatus(ctx, requestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
-		p.logger.Error("failed to mark profile request as failed", zap.Error(updateErr))
-	}
 }
 
 // RecommendProcessor обрабатывает сообщения astro.events.recommend.
