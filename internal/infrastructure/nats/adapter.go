@@ -21,11 +21,12 @@ type NATSConn struct {
 	logger *zap.Logger
 }
 
+// TODO: test
 var backOff = [4]time.Duration{
-	5 * time.Second,
-	10 * time.Second,
-	15 * time.Second,
-	20 * time.Second,
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
+	16 * time.Second,
 }
 
 /*var backOff = [4]time.Duration{
