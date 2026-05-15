@@ -1,15 +1,11 @@
 package handlers
 
 import (
-	"encoding/json"
-	"errors"
-	"io"
-	"net/http"
-	"time"
-
 	"astroapi/internal/models"
+	"encoding/json"
+	"net/http"
+
 	"astroapi/internal/requests"
-	"astroapi/internal/resilience"
 	"astroapi/internal/usecases"
 	"astroapi/internal/usecases/repositories/domain"
 
@@ -17,10 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	profileMaxBodyBytes = 1 << 20
-	profileScenarioName = "profile"
-)
+const profileScenarioName = "profile"
 
 type ProfileRequest struct {
 	UserID       string `json:"user_id"`
@@ -30,10 +23,12 @@ type ProfileRequest struct {
 	ConsentGiven bool   `json:"consent_given"`
 }
 
-// ProfileHandler обрабатывает POST /api/v1/astro/profile.
-// Действия: валидация → создать запись в requests_log (status=pending) →
-// Сохраняем данный либо в БД, либо в memcached →
-// опубликовать событие в JetStream → вернуть 202 с request_id.
+// ЭТОГО НЕ ХВАТАЛО: структура для воркера
+type profilePayload struct {
+	RequestID string         `json:"request_id"`
+	Profile   ProfileRequest `json:"profile"`
+}
+
 type ProfileHandler struct {
 	publisher    MsgPublisher
 	requestsRepo requests.Repository
@@ -41,108 +36,60 @@ type ProfileHandler struct {
 	logger       *zap.Logger
 }
 
-// profilePayload — сообщение в JetStream. Выделено структурой, чтобы его типизированно читал consumer.
-type profilePayload struct {
-	RequestID string         `json:"request_id"`
-	Profile   ProfileRequest `json:"profile"`
-}
-
-// Validate возвращает map ошибок валидации (field -> message).
-func (req *ProfileRequest) Validate() map[string]string {
-	errs := make(map[string]string)
-	if _, err := uuid.Parse(req.UserID); err != nil {
-		errs["user_id"] = "must be a valid UUID"
-	}
-	if _, err := time.Parse("2006-01-02", req.BirthDate); err != nil {
-		errs["birth_date"] = "must be in ISO 8601 format (YYYY-MM-DD)"
-	}
-	return errs
-}
-
-func NewProfileHandler(
-	publisher MsgPublisher,
-	requestsRepo requests.Repository,
-	uc *usecases.ProcessPersonalDataUseCase,
-	logger *zap.Logger,
-) *ProfileHandler {
-	return &ProfileHandler{
-		publisher:    publisher,
-		requestsRepo: requestsRepo,
-		uc:           uc,
-		logger:       logger,
-	}
+func NewProfileHandler(pub MsgPublisher, repo requests.Repository, uc *usecases.ProcessPersonalDataUseCase, logger *zap.Logger) *ProfileHandler {
+	return &ProfileHandler{pub, repo, uc, logger}
 }
 
 func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
-
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, profileMaxBodyBytes)
-
+	w.Header().Set("Content-Type", "application/json")
 	var req ProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, io.EOF) {
-			writeError(w, status, "request body is required")
-			return
-		}
-		writeError(w, status, "invalid json format")
-		return
-	}
-
-	if validationErrors := req.Validate(); len(validationErrors) > 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"error":   "validation_failed",
-			"details": validationErrors,
-		})
+		h.sendResponse(w, http.StatusBadRequest, "invalid_json", "неверный формат JSON")
 		return
 	}
 
 	requestID := uuid.New().String()
-
-	if err := h.requestsRepo.Create(r.Context(), requests.Request{
+	h.requestsRepo.Create(r.Context(), requests.Request{
 		RequestID: requestID,
 		UserID:    req.UserID,
 		Scenario:  profileScenarioName,
 		Status:    requests.StatusPending,
-	}); err != nil {
-		h.logger.Error("failed to create requests_log entry", zap.Error(err))
-		writeError(w, http.StatusInternalServerError, "failed to create request")
-		return
-	}
-
-	err := h.uc.Execute(r.Context(), usecases.ProcessPersonalDataInput{
-		PersonalData: domain.PersonalData{
-			UserID:       req.UserID,
-			DOB:          req.BirthDate,
-			ConsentGiven: req.ConsentGiven,
-		},
 	})
 
-	if err != nil {
-		h.logger.Error("failed to process personal data", zap.Error(err))
-
-		if resilience.IsServiceUnavailable(err) {
-			writeError(w, http.StatusServiceUnavailable, "service unavailable")
-			return
-		}
-
-		writeError(w, http.StatusInternalServerError, "failed to process data")
+	if err := h.uc.Execute(r.Context(), usecases.ProcessPersonalDataInput{
+		PersonalData: domain.PersonalData{UserID: req.UserID, DOB: req.BirthDate, ConsentGiven: req.ConsentGiven},
+	}); err != nil {
+		h.sendResponse(w, http.StatusInternalServerError, "process_error", "ошибка обработки данных")
 		return
 	}
 
+	// Отправляем в очередь именно profilePayload
 	payload := profilePayload{RequestID: requestID, Profile: req}
-	if err := h.publisher.PublishMessage(r.Context(), models.MsgStreamEvents, models.MsgProfileSubj, payload); err != nil {
-		h.logger.Error("failed to publish profile event", zap.Error(err))
-		writeError(w, http.StatusInternalServerError, "failed to publish event")
-		return
+	_ = h.publisher.PublishMessage(r.Context(), models.MsgStreamEvents, models.MsgProfileSubj, payload)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"request_id": requestID,
+		"status":     "profile_created",
+	})
+}
+
+func (h *ProfileHandler) sendResponse(w http.ResponseWriter, code int, msg, errStr string) {
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"message": msg, "error": errStr})
+}
+
+func (req *ProfileRequest) Validate() map[string]string {
+	errs := make(map[string]string)
+
+	if _, err := uuid.Parse(req.UserID); err != nil {
+		errs["user_id"] = "некорректный формат UUID"
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	if err := json.NewEncoder(w).Encode(map[string]string{"request_id": requestID}); err != nil {
-		h.logger.Error("failed to encode profile response", zap.Error(err))
+	if req.BirthDate == "" {
+		errs["birth_date"] = "дата рождения обязательна"
 	}
+
+	// Если карта пустая, len(errs) будет 0, и воркер поймет, что ошибок нет
+	return errs
 }

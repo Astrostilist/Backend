@@ -8,16 +8,21 @@ import (
 
 	"astroapi/internal/models"
 	"astroapi/internal/repositories"
+	"astroapi/internal/requests"
 
 	"github.com/google/uuid"
 )
 
 type FeedbackHandler struct {
-	repo repositories.FeedbackRepository
+	repo         repositories.FeedbackRepository
+	requestsRepo requests.Repository
 }
 
-func NewFeedbackHandler(repo repositories.FeedbackRepository) *FeedbackHandler {
-	return &FeedbackHandler{repo: repo}
+func NewFeedbackHandler(repo repositories.FeedbackRepository, requestsRepo requests.Repository) *FeedbackHandler {
+	return &FeedbackHandler{
+		repo:         repo,
+		requestsRepo: requestsRepo,
+	}
 }
 
 type feedbackRequest struct {
@@ -27,27 +32,31 @@ type feedbackRequest struct {
 }
 
 func (h *FeedbackHandler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var req feedbackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error": "неверный формат JSON"}`, http.StatusBadRequest)
+		h.sendResponse(w, http.StatusBadRequest, "invalid_json", "неверный формат JSON")
 		return
 	}
 
-	if req.RequestID == "" {
-		http.Error(w, `{"error": "request_id обязателен"}`, http.StatusBadRequest)
+	// 1. Проверка существования и статуса запроса
+	requestLog, err := h.requestsRepo.Get(r.Context(), req.RequestID)
+	if err != nil {
+		if errors.Is(err, requests.ErrNotFound) {
+			h.sendResponse(w, http.StatusNotFound, "not_found", "запрос не найден")
+			return
+		}
+		h.sendResponse(w, http.StatusInternalServerError, "db_error", "ошибка базы данных")
 		return
 	}
 
-	if req.Rating < 1 || req.Rating > 5 {
-		http.Error(w, `{"error": "rating должен быть от 1 до 5"}`, http.StatusUnprocessableEntity)
+	// Фидбек принимаем только для успешно завершенных генераций
+	if requestLog.Status != requests.StatusCompleted {
+		h.sendResponse(w, http.StatusBadRequest, "wrong_status", "оценка возможна только для завершенных запросов")
 		return
 	}
 
-	if len(req.Comment) > 500 {
-		http.Error(w, `{"error": "comment не должен превышать 500 символов"}`, http.StatusUnprocessableEntity)
-		return
-	}
-
+	// 2. Сохранение фидбека
 	feedback := &models.Feedback{
 		ID:        uuid.New().String(),
 		RequestID: req.RequestID,
@@ -56,24 +65,26 @@ func (h *FeedbackHandler) CreateFeedback(w http.ResponseWriter, r *http.Request)
 		CreatedAt: time.Now(),
 	}
 
-	err := h.repo.Create(r.Context(), feedback)
-	if err != nil {
-		// Эталонная обработка ошибок (без парсинга строк)
+	if err := h.repo.Create(r.Context(), feedback); err != nil {
 		if errors.Is(err, models.ErrFeedbackExists) {
-			http.Error(w, `{"error": "отзыв для этого request_id уже существует"}`, http.StatusConflict)
+			h.sendResponse(w, http.StatusConflict, "already_exists", "отзыв уже оставлен")
 			return
 		}
-
-		if errors.Is(err, models.ErrRequestNotFound) {
-			http.Error(w, `{"error": "указанный request_id не найден"}`, http.StatusNotFound)
-			return
-		}
-
-		http.Error(w, `{"error": "внутренняя ошибка сервера"}`, http.StatusInternalServerError)
+		h.sendResponse(w, http.StatusInternalServerError, "save_failed", "ошибка сохранения отзыва")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_, _ = w.Write([]byte(`{"status": "success", "message": "Отзыв успешно сохранен"}`))
+	// 3. Успешный ответ (200 OK)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Feedback saved successfully",
+	})
+}
+
+func (h *FeedbackHandler) sendResponse(w http.ResponseWriter, code int, msg, errStr string) {
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": msg,
+		"error":   errStr,
+	})
 }

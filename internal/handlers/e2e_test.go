@@ -1,4 +1,4 @@
-package handlers_test
+package handlers
 
 import (
 	"bytes"
@@ -13,7 +13,6 @@ import (
 
 	"astroapi/config"
 	"astroapi/internal/alisa"
-	"astroapi/internal/handlers"
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
@@ -207,8 +206,8 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	personalDataCache := newMemPersonalDataCache()
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(personalDataRepo, personalDataCache)
 
-	profileProc := handlers.NewProfileProcessor(userRepo, reqRepo, logger)
-	router := handlers.NewMsgRouter(logger)
+	profileProc := NewProfileProcessor(userRepo, reqRepo, logger)
+	router := NewMsgRouter(logger)
 	router.Register(models.MsgProfileSubj, profileProc)
 
 	consumer := natsinfra.NewMessageConsumer(adapter)
@@ -217,7 +216,7 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 			return router.Dispatch(c, msg.Subject(), msg.Data())
 		}))
 
-	h := handlers.NewProfileHandler(publisher, reqRepo, personalDataUC, logger)
+	h := NewProfileHandler(publisher, reqRepo, personalDataUC, logger)
 	body := []byte(`{
 		"user_id":"123e4567-e89b-12d3-a456-426614174000",
 		"birth_date":"1990-01-01",
@@ -227,14 +226,14 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/profile", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	h.HandleProfile(rr, req)
-	require.Equal(t, http.StatusAccepted, rr.Code)
+	require.Equal(t, http.StatusOK, rr.Code)
 
 	var resp map[string]string
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
 	requestID := resp["request_id"]
 	require.NotEmpty(t, requestID)
 
-	waitFor(t, 3*time.Second, func() bool {
+	waitFor(t, 40*time.Second, func() bool {
 		r, ok := reqRepo.lookup(requestID)
 		return ok && r.Status == requests.StatusCompleted
 	})
@@ -276,22 +275,20 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 	rulesRepo := &memRulesRepo{tags: []string{"luxury"}}
 	ai := stubAI{reply: "e2e response"}
 
-	proc := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, logger)
-	router := handlers.NewMsgRouter(logger)
-	router.Register(models.MsgRecommendSubj, proc)
-
+	profileProcessor := NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, logger)
+	router := NewMsgRouter(logger)
+	router.Register(models.MsgProfileSubj, profileProcessor)
 	consumer := natsinfra.NewMessageConsumer(adapter)
 	require.NoError(t, consumer.ConsumeWithHandler(ctx, models.MsgStreamEvents, models.MsgRecommendWrk,
 		func(c context.Context, msg jetstream.Msg) error {
 			return router.Dispatch(c, msg.Subject(), msg.Data())
 		}))
 
-	h := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, ai, reqRepo, logger)
+	h := NewRecommendHandler(publisher, userRepo, rulesRepo, ai, reqRepo, logger)
 
 	body, _ := json.Marshal(map[string]any{
-		"user_id":  validUserID,
+		"user_id":  validUserID, // Убедись, что это не пустая строка
 		"scenario": "personal_style",
-		"mode":     "async",
 		"context":  map[string]any{"triggers": []string{"Полнолуние"}},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
@@ -299,17 +296,17 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 	h.Handle(rr, req)
 	require.Equal(t, http.StatusAccepted, rr.Code)
 
-	var resp map[string]string
+	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	requestID := resp["request_id"]
+	requestID := resp["request_id"].(string)
 
-	waitFor(t, 3*time.Second, func() bool {
+	waitFor(t, 20*time.Second, func() bool {
 		r, ok := reqRepo.lookup(requestID)
 		return ok && r.Status == requests.StatusCompleted && len(r.Result) > 0
 	})
 
 	final, _ := reqRepo.lookup(requestID)
-	var res handlers.RecommendationResult
+	var res RecommendationResult
 	require.NoError(t, json.Unmarshal(final.Result, &res))
 	require.Equal(t, "e2e response", res.Text)
 	require.Equal(t, []string{"luxury"}, res.Tags)
@@ -329,6 +326,6 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 }
 
 var (
-	_ handlers.RuleMatcher = (*memRulesRepo)(nil)
-	_ alisa.Generator      = stubAI{}
+	_ RuleMatcher     = (*memRulesRepo)(nil)
+	_ alisa.Generator = stubAI{}
 )

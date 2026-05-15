@@ -1,11 +1,9 @@
-package handlers_test
+package handlers
 
 import (
 	"context"
 	"errors"
 	"testing"
-
-	"astroapi/internal/handlers"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -13,11 +11,11 @@ import (
 
 func TestMsgRouter_DispatchesToRegisteredHandler(t *testing.T) {
 	t.Parallel()
-	router := handlers.NewMsgRouter(zap.NewNop())
+	router := NewMsgRouter(zap.NewNop())
 
 	var gotSubject string
 	var gotData []byte
-	router.Register("astro.events.profile", handlers.HandlerFunc(func(_ context.Context, data []byte) error {
+	router.Register("astro.events.profile", HandlerFunc(func(_ context.Context, data []byte) error {
 		gotSubject = "astro.events.profile"
 		gotData = data
 		return nil
@@ -32,7 +30,7 @@ func TestMsgRouter_DispatchesToRegisteredHandler(t *testing.T) {
 
 func TestMsgRouter_NoHandlerReturnsError(t *testing.T) {
 	t.Parallel()
-	router := handlers.NewMsgRouter(zap.NewNop())
+	router := NewMsgRouter(zap.NewNop())
 
 	err := router.Dispatch(context.Background(), "unknown.subject", nil)
 	require.Error(t, err)
@@ -41,10 +39,10 @@ func TestMsgRouter_NoHandlerReturnsError(t *testing.T) {
 
 func TestMsgRouter_HandlerErrorPropagates(t *testing.T) {
 	t.Parallel()
-	router := handlers.NewMsgRouter(zap.NewNop())
+	router := NewMsgRouter(zap.NewNop())
 
 	sentinel := errors.New("boom")
-	router.Register("s", handlers.HandlerFunc(func(context.Context, []byte) error {
+	router.Register("s", HandlerFunc(func(context.Context, []byte) error {
 		return sentinel
 	}))
 
@@ -54,14 +52,14 @@ func TestMsgRouter_HandlerErrorPropagates(t *testing.T) {
 
 func TestMsgRouter_LatestRegistrationWins(t *testing.T) {
 	t.Parallel()
-	router := handlers.NewMsgRouter(zap.NewNop())
+	router := NewMsgRouter(zap.NewNop())
 
 	calls := 0
-	router.Register("s", handlers.HandlerFunc(func(context.Context, []byte) error {
+	router.Register("s", HandlerFunc(func(context.Context, []byte) error {
 		calls = 1
 		return nil
 	}))
-	router.Register("s", handlers.HandlerFunc(func(context.Context, []byte) error {
+	router.Register("s", HandlerFunc(func(context.Context, []byte) error {
 		calls = 2
 		return nil
 	}))

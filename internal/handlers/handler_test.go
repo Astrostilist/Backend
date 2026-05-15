@@ -1,4 +1,4 @@
-package handlers_test
+package handlers
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"astroapi/internal/handlers"
 	"astroapi/internal/handlers/mocks"
 
 	"github.com/stretchr/testify/require"
@@ -16,7 +15,7 @@ import (
 
 func TestRealHelloService_NilDBReturnsNotInitialized(t *testing.T) {
 	t.Parallel()
-	svc := handlers.NewRealHelloService(nil)
+	svc := NewRealHelloService(nil)
 	require.Equal(t, "not initialized", svc.GetDBStatus(context.Background()))
 }
 
@@ -42,7 +41,7 @@ func TestHelloWorldHandler_StatusMap(t *testing.T) {
 			service := mocks.NewMockHelloService(ctrl)
 			service.EXPECT().GetDBStatus(gomock.Any()).Return(tc.dbStatus).Times(1)
 
-			handler := handlers.NewHelloHandler(service)
+			handler := NewHelloHandler(service)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/", nil)
 			rr := httptest.NewRecorder()
 
@@ -50,7 +49,7 @@ func TestHelloWorldHandler_StatusMap(t *testing.T) {
 
 			require.Equal(t, http.StatusOK, rr.Code)
 
-			var resp handlers.Response
+			var resp Response
 			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
 			data, ok := resp.Data.(map[string]any)
 			require.True(t, ok, "expected data object")

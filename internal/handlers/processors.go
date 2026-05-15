@@ -1,14 +1,12 @@
 package handlers
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"time"
-
 	"astroapi/internal/alisa"
 	"astroapi/internal/requests"
 	"astroapi/internal/user"
+	"context"
+	"encoding/json"
+	"fmt"
 
 	"go.uber.org/zap"
 )
@@ -139,8 +137,7 @@ func NewProfileProcessor(userRepo user.Repository, requestsRepo requests.Reposit
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
-
-	time.Sleep(15 * time.Second) // TODO: test
+	// TODO: test
 
 	var msg profilePayload
 	if err := json.Unmarshal(payload, &msg); err != nil {
