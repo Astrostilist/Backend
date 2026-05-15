@@ -27,11 +27,11 @@ import (
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
 	"astroapi/internal/products"
-	feedbackrepo "astroapi/internal/repositories"
+	"astroapi/internal/repositories"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
 	"astroapi/internal/usecases"
-	repositories "astroapi/internal/usecases/repositories"
+	ucrepos "astroapi/internal/usecases/repositories"
 	"astroapi/internal/user"
 
 	"github.com/go-chi/chi/v5"
@@ -120,8 +120,11 @@ func run() error {
 	productsRepo := products.NewPostgresRepository(db.DB)
 	adminRepo := admin.NewPostgresRepository(db.DB)
 
-	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
-	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
+	// ИСПРАВЛЕНО: Правильное имя конструктора из feedback_postgres.go
+	feedbackRepo := repositories.NewFeedbackRepository(db.DB)
+
+	dbRepo := ucrepos.NewDBPersonalDataRepository(db.DB, encryptionKey)
+	cacheRepo := ucrepos.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 
 	healthRepo := health.NewHealthServiceRepo(db, natsConn)
@@ -192,8 +195,8 @@ func run() error {
 	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
 	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
 
-	// Передача обеих зависимостей для задачи #77
-	feedbackHandler := handlers.NewFeedbackHandler(feedbackrepo.NewFeedbackRepository(db.DB), requestsRepo)
+	// ИСПРАВЛЕНО: Используем правильную переменную zapLogger
+	feedbackHandler := handlers.NewFeedbackHandler(feedbackRepo, requestsRepo, zapLogger)
 
 	dlqReader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqReader, zapLogger)
