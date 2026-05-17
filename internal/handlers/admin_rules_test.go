@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -47,26 +46,35 @@ func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions)
 		return filtered[i].Priority < filtered[j].Priority
 	})
 
-	start := min(options.Offset, len(filtered))
+	limit := options.Limit
+	if limit <= 0 {
+		limit = defaultRulesLimit
+	}
 
-	end := min(start+options.Limit, len(filtered))
-	mtdata := rules.Metadata{
-		CurrentPage:  options.Limit,
-		PageSize:     options.Limit,
-		FirstPage:    start,
-		LastPage:     end,
+	page := options.Offset
+	if page < 1 {
+		page = 1
+	}
+
+	start := (page - 1) * limit
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+	end := min(start+limit, len(filtered))
+	metadata := rules.Metadata{
+		CurrentPage:  page,
+		PageSize:     limit,
+		FirstPage:    1,
+		LastPage:     1,
 		TotalRecords: len(filtered),
 	}
 
-	var subFiltered []*rules.Rule
-	subFiltered = make([]*rules.Rule, 0)
+	subFiltered := make([]*rules.Rule, 0, end-start)
 	for i := start; i < end; i++ {
 		subFiltered = append(subFiltered, &filtered[i])
 	}
-	// subFiltered := filtered[start:end]
-	// myPointer := &subFiltered
 
-	return subFiltered, mtdata, nil
+	return subFiltered, metadata, nil
 }
 func (r *fakeRulesRepository) Create(_ context.Context, input *rules.RuleInput) (uuid.UUID, error) {
 	now := time.Now().UTC()
@@ -171,7 +179,7 @@ func TestCreateRuleRejectsNegativePriority(t *testing.T) {
 
 	payload := []byte(`{"name":"Retrograde rule","astro_condition":{"planet":"mars"},"product_tags":["energy"],"priority":-1}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/rules", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	mux := newAdminRulesTestMux(newFakeRulesRepository(nil))
@@ -203,7 +211,7 @@ func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/rules/"+smplID.String(), nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	mux := newAdminRulesTestMux(repository)
@@ -229,7 +237,7 @@ func TestCreateRuleSucceeds(t *testing.T) {
 	repository := newFakeRulesRepository(nil)
 	payload := []byte(`{"name":"Lunar","astro_condition":{"moon":"full"},"product_tags":["mystic"],"priority":10,"is_active":true}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/rules", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	mux := newAdminRulesTestMux(repository)
@@ -238,14 +246,10 @@ func TestCreateRuleSucceeds(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d, body=%s", response.Code, response.Body.String())
 	}
-	fmt.Println("epository.items[created-rule-id] = ", repository.items)
-
 	var resp Response
 	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
 		t.Fatalf("cannot be decoded body: %v\n", err)
 	}
-	fmt.Printf("%v %T\n", resp.Data, resp.Data)
-
 	bytes, _ := json.Marshal(resp.Data)
 	output := make(map[string]string)
 
@@ -293,7 +297,7 @@ func TestUpdateRuleModifiesFields(t *testing.T) {
 
 	payload := []byte(`{"name":"New","astro_condition":{"sign":"taurus"},"product_tags":["earth"],"priority":7,"is_active":true}`)
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/rules/"+ruleID.String(), bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	mux := newAdminRulesTestMux(repository)
@@ -314,7 +318,7 @@ func TestUpdateRuleNotFound(t *testing.T) {
 
 	payload := []byte(`{"name":"X","astro_condition":{"a":"b"},"product_tags":["t"],"priority":1,"is_active":true}`)
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/rules/missing", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	mux := newAdminRulesTestMux(newFakeRulesRepository(nil))
@@ -359,8 +363,8 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 		},
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules?is_active=true&limit=50&offset=0", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules?is_active=true&page_size=50&page=1", nil)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	mux := newAdminRulesTestMux(repository)
@@ -420,7 +424,7 @@ func TestGetRuleFiltersByActiveFlag(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules/"+smplID1.String(), nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	mux := newAdminRulesTestMux(repository)

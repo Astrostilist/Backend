@@ -6,16 +6,16 @@ import (
 	"time"
 )
 
-func AdminAuthMiddleware(adminToken string) func(http.Handler) http.Handler {
+func AdminAuthMiddleware(tokenSecret string) func(http.Handler) http.Handler {
+	secret := strings.TrimSpace(tokenSecret)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-			staticToken := strings.TrimSpace(adminToken)
+			parts := strings.Fields(authHeader)
+			isBearerToken := len(parts) == 2 && strings.EqualFold(parts[0], "Bearer")
 
-			isStaticToken := staticToken != "" && authHeader == "Bearer "+staticToken
-			isLoginToken := token != "" && VerifyAdminAccessToken(token, staticToken, time.Now())
-			if !isStaticToken && !isLoginToken {
+			if !isBearerToken || !VerifyAdminAccessToken(parts[1], secret, time.Now()) {
 				writeError(w, http.StatusUnauthorized, "admin authorization token is missing or invalid")
 				return
 			}

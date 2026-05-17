@@ -45,12 +45,12 @@ SUPERADMIN_PASSWORD=__CHANGEME_MIN_8_CHARS__
 ADMIN_TOKEN=__CHANGEME_ADMIN_TOKEN__
 ```
 
-`ADMIN_TOKEN` используется как секрет для подписи access token и остается совместимым со старой схемой доступа к admin routes. Повторный запуск bootstrap-команды не создает дубликат SuperAdmin.
+`ADMIN_TOKEN` используется как секрет для подписи JWT access token. Статический доступ к admin routes через сырой `ADMIN_TOKEN` больше не используется: сначала нужно получить JWT через login. Повторный запуск bootstrap-команды не создает дубликат SuperAdmin.
 
 После создания SuperAdmin можно пройти авторизацию через AUTH-01:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/auth/login \
+curl -X POST http://localhost:8080/api/v1/admin/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.com","password":"__CHANGEME_MIN_8_CHARS__"}'
 ```

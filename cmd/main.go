@@ -190,7 +190,6 @@ func run() error {
 	})
 
 	wg.Go(func() {
-		defer wg.Done()
 		monitor.StartInfraMonitor(rootCtx)
 		<-rootCtx.Done()
 	})
@@ -224,8 +223,12 @@ func run() error {
 		r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
 	})
 
+	r.Post("/api/v1/admin/login", authHandler.Login)
 	r.Post("/api/v1/auth/login", authHandler.Login)
-	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
+	r.Group(func(r chi.Router) {
+		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))
+		r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
+	})
 
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
 	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)

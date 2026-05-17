@@ -144,6 +144,57 @@ paths:
 
   # ─── Admin API ─────────────────────────────────────────────────────────────
 
+
+  /api/v1/admin/login:
+    post:
+      summary: Авторизация SuperAdmin
+      description: Возвращает JWT access token при валидных учетных данных SuperAdmin.
+      tags: [Admin — Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+            example:
+              email: admin@example.com
+              password: secure-password
+      responses:
+        "200":
+          description: JWT успешно выдан
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      access_token:
+                        type: string
+                        description: JWT token
+                      token_type:
+                        type: string
+                        example: Bearer
+                      expires_in:
+                        type: integer
+                        example: 86400
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /api/v1/admin/rules:
     get:
       summary: Список правил маппинга
@@ -560,7 +611,7 @@ components:
     adminAuth:
       type: http
       scheme: bearer
-      description: ADMIN_TOKEN из переменных окружения
+      description: JWT access token, полученный через POST /api/v1/admin/login
 
   responses:
     BadRequest:

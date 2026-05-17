@@ -133,7 +133,7 @@ func TestListProductsFiltersByCategory(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/products?category=rings&page=1&page_size=10", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	mux := newAdminProductsTestMux(repository, nil)
@@ -175,7 +175,7 @@ func TestPatchProductUnknownSKUReturnsNotFound(t *testing.T) {
 
 	payload := []byte(`{"tags":["new"]}`)
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/products/missing-sku", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	mux := newAdminProductsTestMux(newFakeProductsRepository(nil), nil)
@@ -205,7 +205,7 @@ func TestPatchProductTagsInvalidatesCache(t *testing.T) {
 
 	payload := []byte(`{"tags":["new","summer"]}`)
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/products/sku-1", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	mux := newAdminProductsTestMux(repository, invalidator)

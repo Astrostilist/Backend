@@ -81,7 +81,7 @@ func TestListAdminLogsFiltersByFailedStatus(t *testing.T) {
 	}}
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs?status=failed", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	newAdminLogsTestMux(repository).ServeHTTP(response, request)
@@ -118,7 +118,7 @@ func TestListAdminLogsRejectsLimitOverMax(t *testing.T) {
 
 	repository := &fakeAdminLogsRepository{}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs?limit=201", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	newAdminLogsTestMux(repository).ServeHTTP(response, request)
@@ -146,7 +146,7 @@ func TestListAdminLogsTruncatesErrorMessage(t *testing.T) {
 		},
 	}}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+testAdminBearerToken(t))
 	response := httptest.NewRecorder()
 
 	newAdminLogsTestMux(repository).ServeHTTP(response, request)
