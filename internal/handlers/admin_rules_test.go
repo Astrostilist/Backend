@@ -18,8 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const testAdminToken = "test-admin-token"
-
 type fakeRulesRepository struct {
 	items map[string]rules.Rule
 }
