@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -45,26 +44,48 @@ func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions)
 		return filtered[i].Priority < filtered[j].Priority
 	})
 
-	start := min(options.Offset, len(filtered))
+	limit := options.Limit
+	if limit < 1 {
+		limit = len(filtered)
+	}
 
-	end := min(start+options.Limit, len(filtered))
-	mtdata := rules.Metadata{
-		CurrentPage:  options.Limit,
-		PageSize:     options.Limit,
-		FirstPage:    start,
-		LastPage:     end,
+	page := options.Offset
+	if page < 1 {
+		page = 1
+	}
+
+	start := (page - 1) * limit
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+
+	end := start + limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+
+	items := make([]*rules.Rule, 0, end-start)
+	for i := start; i < end; i++ {
+		items = append(items, &filtered[i])
+	}
+
+	metadata := rules.Metadata{
+		CurrentPage:  page,
+		PageSize:     limit,
+		FirstPage:    1,
+		LastPage:     calculateLastPage(len(filtered), limit),
 		TotalRecords: len(filtered),
 	}
 
-	var subFiltered []*rules.Rule
-	subFiltered = make([]*rules.Rule, 0)
-	for i := start; i < end; i++ {
-		subFiltered = append(subFiltered, &filtered[i])
-	}
-	// subFiltered := filtered[start:end]
-	// myPointer := &subFiltered
+	return items, metadata, nil
+}
 
-	return subFiltered, mtdata, nil
+func calculateLastPage(totalRecords int, pageSize int) int {
+	lastPage := 0
+	if totalRecords > 0 && pageSize > 0 {
+		lastPage = (totalRecords + pageSize - 1) / pageSize
+	}
+	return lastPage
 }
 func (r *fakeRulesRepository) Create(_ context.Context, input *rules.RuleInput) (uuid.UUID, error) {
 	now := time.Now().UTC()
@@ -236,13 +257,11 @@ func TestCreateRuleSucceeds(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d, body=%s", response.Code, response.Body.String())
 	}
-	fmt.Println("epository.items[created-rule-id] = ", repository.items)
 
 	var resp Response
 	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
 		t.Fatalf("cannot be decoded body: %v\n", err)
 	}
-	fmt.Printf("%v %T\n", resp.Data, resp.Data)
 
 	bytes, _ := json.Marshal(resp.Data)
 	output := make(map[string]string)
@@ -357,7 +376,7 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 		},
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules?is_active=true&limit=50&offset=0", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules?is_active=true&page_size=50&page=1", nil)
 	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
