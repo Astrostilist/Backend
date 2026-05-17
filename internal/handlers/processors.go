@@ -3,10 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"astroapi/internal/alisa"
-	astroproc "astroapi/internal/astroproc"
 	"astroapi/internal/requests"
 	"astroapi/internal/user"
 
@@ -19,6 +19,12 @@ type RuleMatcher interface {
 	Match(ctx context.Context, triggers []string) ([]string, error)
 }
 
+// AstroProfileGetter — узкий интерфейс внешнего Astro API клиента.
+// Реализуется alisa.AstroAPIClient; интерфейс оставлен маленьким для тестов воркеров.
+type AstroProfileGetter interface {
+	GetAstroProfileContext(ctx context.Context, birthDate, birthPlace string) (alisa.AstroProfile, error)
+}
+
 // RecommendationResult — результат построения рекомендации (общий для sync и async).
 type RecommendationResult struct {
 	Text string   `json:"text"`
@@ -26,13 +32,16 @@ type RecommendationResult struct {
 }
 
 // buildRecommendation собирает профиль, триггеры, prompt и дергает AlisaAI.
-// Возвращает готовый RecommendationResult или ошибку (в т.ч. обёрнутую validation).
+// Если в context передан birth_place, профиль дополнительно обогащается через Astro API.
 func buildRecommendation(
 	ctx context.Context,
 	req RecommendRequest,
 	userRepo user.Repository,
 	rulesRepo RuleMatcher,
-	ai alisa.Generator, logger *zap.Logger) (RecommendationResult, error) {
+	ai alisa.Generator,
+	astroClient AstroProfileGetter,
+	logger *zap.Logger,
+) (RecommendationResult, error) {
 	u, err := userRepo.Get(ctx, req.UserID)
 	if err != nil {
 		return RecommendationResult{}, err
@@ -44,14 +53,16 @@ func buildRecommendation(
 		return RecommendationResult{}, fmt.Errorf("match rules: %w", err)
 	}
 
-	astroProfile := alisa.AstroProfile{
-		UserID:    u.UserID,
-		BirthDate: u.BirthDate,
+	astroProfile, err := buildAstroProfile(ctx, req, u, astroClient)
+	if err != nil {
+		return RecommendationResult{}, err
 	}
+
 	enrichedCtx := map[string]any{"tags": tags}
 	for k, v := range req.Context {
 		enrichedCtx[k] = v
 	}
+
 	prompt := alisa.BuildPrompt(req.Scenario, astroProfile, enrichedCtx, logger)
 	if prompt == "" {
 		return RecommendationResult{}, fmt.Errorf("validation: cannot build prompt for scenario %q", req.Scenario)
@@ -63,6 +74,41 @@ func buildRecommendation(
 	}
 
 	return RecommendationResult{Text: text, Tags: tags}, nil
+}
+
+func buildAstroProfile(
+	ctx context.Context,
+	req RecommendRequest,
+	u user.User,
+	astroClient AstroProfileGetter,
+) (alisa.AstroProfile, error) {
+	birthPlace, _ := stringFromContext(req.Context, "birth_place")
+	profile := alisa.AstroProfile{
+		UserID:     u.UserID,
+		BirthDate:  u.BirthDate,
+		BirthPlace: birthPlace,
+	}
+
+	if astroClient == nil || birthPlace == "" {
+		return profile, nil
+	}
+
+	apiProfile, err := astroClient.GetAstroProfileContext(ctx, u.BirthDate, birthPlace)
+	if err != nil {
+		return profile, fmt.Errorf("astro api profile: %w", err)
+	}
+
+	if apiProfile.UserID == "" {
+		apiProfile.UserID = u.UserID
+	}
+	if apiProfile.BirthDate == "" {
+		apiProfile.BirthDate = u.BirthDate
+	}
+	if apiProfile.BirthPlace == "" {
+		apiProfile.BirthPlace = birthPlace
+	}
+
+	return apiProfile, nil
 }
 
 // triggersFromContext достаёт список триггеров из context.
@@ -85,6 +131,18 @@ func triggersFromContext(ctx map[string]any) ([]string, bool) {
 	return triggers, true
 }
 
+func stringFromContext(ctx map[string]any, key string) (string, bool) {
+	raw, ok := ctx[key]
+	if !ok {
+		return "", false
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", false
+	}
+	return value, value != ""
+}
+
 func beginRequestProcessing(
 	ctx context.Context,
 	repo requests.Repository,
@@ -100,10 +158,9 @@ func beginRequestProcessing(
 		return false, nil
 	}
 	if req.Status != requests.StatusPending {
-		// TODO:
-		// разобраться с процессом. Обработчик должен либо обрабатывать запрос до состояния completed,
-		// либо возвращать ошибку. Иначе у нас и запрос не обработан и сообщение из очереди удалено
-		return false, fmt.Errorf("request is not pending, skip processing")
+		logger.Info("request is not pending, skip processing",
+			zap.String("request_id", requestID), zap.String("status", req.Status))
+		return false, nil
 	}
 
 	started, err := repo.StartProcessing(ctx, requestID)
@@ -127,22 +184,23 @@ func beginRequestProcessing(
 }
 
 // ProfileProcessor обрабатывает сообщения astro.events.profile.
-// Сохраняет астропрофиль пользователя и обновляет requests_log.
-
+// Воркер вызывает внешний Astro API, пишет результат в requests_log и завершает задачу.
 type ProfileProcessor struct {
-	userRepo     user.Repository
 	requestsRepo requests.Repository
-	astroprc     astroproc.AstroProc
+	astroClient  AstroProfileGetter
 	logger       *zap.Logger
 }
 
-func NewProfileProcessor(userRepo user.Repository, requestsRepo requests.Repository,
-	astroprc astroproc.AstroProc, logger *zap.Logger) *ProfileProcessor {
-	return &ProfileProcessor{userRepo: userRepo, requestsRepo: requestsRepo, astroprc: astroprc, logger: logger}
+func NewProfileProcessor(
+	_ user.Repository,
+	requestsRepo requests.Repository,
+	astroClient AstroProfileGetter,
+	logger *zap.Logger,
+) *ProfileProcessor {
+	return &ProfileProcessor{requestsRepo: requestsRepo, astroClient: astroClient, logger: logger}
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
-
 	var msg profilePayload
 	if err := json.Unmarshal(payload, &msg); err != nil {
 		return fmt.Errorf("validation: invalid profile payload: %w", err)
@@ -159,29 +217,59 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 		return nil
 	}
 
-	// TODO: get astroprofile from cache or astro API call instead of user save
-	// user had saved in (h *ProfileHandler) HandleProfile
-	profile, err := p.astroprc.GetAstroProfile(ctx, msg.Profile.UserID)
+	if p.astroClient == nil {
+		err := errors.New("astro profile client is not configured")
+		p.markFailed(ctx, msg.RequestID, err, "profile")
+		return err
+	}
+
+	profile, err := p.astroClient.GetAstroProfileContext(ctx, msg.Profile.BirthDate, msg.Profile.BirthPlace)
 	if err != nil {
-		return fmt.Errorf("failed to get astro profile: %w", err)
+		p.markFailed(ctx, msg.RequestID, err, "profile")
+		return fmt.Errorf("astro api profile: %w", err)
+	}
+	profile.UserID = msg.Profile.UserID
+	if profile.BirthDate == "" {
+		profile.BirthDate = msg.Profile.BirthDate
+	}
+	if profile.BirthTime == "" {
+		profile.BirthTime = msg.Profile.BirthTime
+	}
+	if profile.BirthPlace == "" {
+		profile.BirthPlace = msg.Profile.BirthPlace
 	}
 
-	p.logger.Info("got astro profile", zap.String("userID", msg.Profile.UserID), zap.Any("data", profile))
+	resultJSON, err := json.Marshal(profile)
+	if err != nil {
+		p.markFailed(ctx, msg.RequestID, err, "profile")
+		return fmt.Errorf("marshal astro profile: %w", err)
+	}
 
-	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, nil, ""); err != nil {
+	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
 		p.logger.Error("failed to mark profile request as completed", zap.Error(err))
+		return err
 	}
 
+	p.logger.Info("astro profile generated",
+		zap.String("request_id", msg.RequestID),
+		zap.String("user_id", msg.Profile.UserID))
 	return nil
 }
 
+func (p *ProfileProcessor) markFailed(ctx context.Context, requestID string, err error, worker string) {
+	if updateErr := p.requestsRepo.UpdateStatus(ctx, requestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
+		p.logger.Error("failed to mark request as failed", zap.String("worker", worker), zap.Error(updateErr))
+	}
+}
+
 // RecommendProcessor обрабатывает сообщения astro.events.recommend.
-// Строит рекомендацию через AlisaAI и пишет результат в requests_log.
+// Строит рекомендацию через Astro API + AlisaAI и пишет результат в requests_log.
 type RecommendProcessor struct {
 	userRepo     user.Repository
 	requestsRepo requests.Repository
 	rulesRepo    RuleMatcher
 	aiClient     alisa.Generator
+	astroClient  AstroProfileGetter
 	logger       *zap.Logger
 }
 
@@ -190,12 +278,15 @@ func NewRecommendProcessor(
 	requestsRepo requests.Repository,
 	rulesRepo RuleMatcher,
 	aiClient alisa.Generator,
-	logger *zap.Logger) *RecommendProcessor {
+	astroClient AstroProfileGetter,
+	logger *zap.Logger,
+) *RecommendProcessor {
 	return &RecommendProcessor{
 		userRepo:     userRepo,
 		requestsRepo: requestsRepo,
 		rulesRepo:    rulesRepo,
 		aiClient:     aiClient,
+		astroClient:  astroClient,
 		logger:       logger,
 	}
 }
@@ -214,7 +305,7 @@ func (p *RecommendProcessor) Handle(ctx context.Context, payload []byte) error {
 		return nil
 	}
 
-	result, err := buildRecommendation(ctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient, p.logger)
+	result, err := buildRecommendation(ctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient, p.astroClient, p.logger)
 	if err != nil {
 		if updateErr := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
 			p.logger.Error("failed to mark recommend request as failed", zap.Error(updateErr))
@@ -224,10 +315,14 @@ func (p *RecommendProcessor) Handle(ctx context.Context, payload []byte) error {
 
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
+		if updateErr := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
+			p.logger.Error("failed to mark recommend request as failed", zap.Error(updateErr))
+		}
 		return fmt.Errorf("marshal recommendation: %w", err)
 	}
 	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
 		p.logger.Error("failed to mark recommend request as completed", zap.Error(err))
+		return err
 	}
 	p.logger.Info("recommendation generated",
 		zap.String("request_id", msg.RequestID),

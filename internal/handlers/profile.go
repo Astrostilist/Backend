@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"astroapi/internal/models"
@@ -55,6 +56,9 @@ func (req *ProfileRequest) Validate() map[string]string {
 	}
 	if _, err := time.Parse("2006-01-02", req.BirthDate); err != nil {
 		errs["birth_date"] = "must be in ISO 8601 format (YYYY-MM-DD)"
+	}
+	if strings.TrimSpace(req.BirthPlace) == "" {
+		errs["birth_place"] = "must not be empty"
 	}
 	return errs
 }

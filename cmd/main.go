@@ -17,7 +17,6 @@ import (
 	"astroapi/internal/admin"
 	"astroapi/internal/adminlogs"
 	"astroapi/internal/alisa"
-	astroproc "astroapi/internal/astroproc"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
 	infra "astroapi/internal/infrastructure"
@@ -149,10 +148,10 @@ func run() error {
 		},
 	)
 
-	astroClient := astroproc.NewAstroAPIClient(cfg.AstroAPIURL, db.DB, zapLogger)
+	astroClient := alisa.NewAstroAPIClientFromConfig(cfg, js, zapLogger, metricsReporter)
 
 	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, astroClient, zapLogger)
-	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, zapLogger)
+	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, astroClient, zapLogger)
 
 	msgRouter := handlers.NewMsgRouter(zapLogger)
 	msgRouter.Register(models.MsgProfileSubj, profileProcessor)
@@ -192,7 +191,6 @@ func run() error {
 	})
 
 	wg.Go(func() {
-		defer wg.Done()
 		monitor.StartInfraMonitor(rootCtx)
 		<-rootCtx.Done()
 	})
@@ -200,7 +198,7 @@ func run() error {
 	helloHandler := handlers.NewHelloHandler(handlers.NewRealHelloService(db))
 	healthHandler := handlers.NewHealthHandler(healthRepo)
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
-	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, requestsRepo, zapLogger)
+	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, astroClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
 	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
