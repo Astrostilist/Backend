@@ -165,7 +165,10 @@ func beginRequestProcessing(
 
 	started, err := repo.StartProcessing(ctx, requestID)
 	if err != nil {
-		return false, err
+		// TODO:
+		// разобраться с процессом. Обработчик должен либо обрабатывать запрос до состояния completed,
+		// либо возвращать ошибку. Иначе у нас и запрос не обработан и сообщение из очереди удалено
+		return false, fmt.Errorf("request is not pending, skip processing")
 	}
 	if !started {
 		current, getErr := repo.Get(ctx, requestID)
