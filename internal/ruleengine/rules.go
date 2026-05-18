@@ -28,8 +28,8 @@ type RuleInput struct {
 
 type ListOptions struct {
 	IsActive *bool
-	Limit    int // pageSize
-	Offset   int // page
+	PageSize int // pageSize
+	Page     int // page
 }
 
 type ListResult struct {
@@ -40,6 +40,7 @@ type Repository interface {
 	Create(ctx context.Context, input *RuleInput) (uuid.UUID, error)
 	Get(ctx context.Context, id string) (*Rule, error)
 	Update(ctx context.Context, id string, input *RuleInput) (uuid.UUID, error)
+	Patch(ctx context.Context, id string, input *RuleInput) (uuid.UUID, error)
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, options ListOptions) ([]*Rule, Metadata, error)
 	Deactivate(ctx context.Context, id string) (*Rule, error)
@@ -70,9 +71,9 @@ func calculateMetadata(totalRecords, page, pageSize int) Metadata {
 }
 
 func (f ListOptions) limit() int {
-	return f.Limit
+	return f.PageSize
 }
 
 func (f ListOptions) offset() int {
-	return (f.Offset - 1) * f.Limit
+	return (f.Page - 1) * f.PageSize
 }
