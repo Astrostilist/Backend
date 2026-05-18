@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
 	"unicode"
 
+	"astroapi/internal/ruleengine"
 	rules "astroapi/internal/ruleengine"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +45,7 @@ func RegisterAdminRulesRoutes(router chi.Router, adminToken string, handler *Adm
 		router.Post("/", handler.CreateRule)
 		router.Get("/{id}", handler.GetRule)
 		router.Put("/{id}", handler.UpdateRule)
+		router.Patch("/{id}", handler.PatchRule)
 		router.Delete("/{id}", handler.DeleteRule)
 	})
 }
@@ -133,6 +136,81 @@ func (h *AdminRulesHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updatedRule, err := h.repository.Update(r.Context(), ruleID, &input)
+	if err != nil {
+		if errors.Is(err, rules.ErrRuleNotFound) {
+			writeError(w, http.StatusNotFound, "astro rule not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update astro rule")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, Response{
+		Message: "Astro rule updated successfully",
+		Data:    map[string]any{"id": updatedRule.String()},
+	})
+}
+
+// PatchRule - частичное обновление.
+func (h *AdminRulesHandler) PatchRule(w http.ResponseWriter, r *http.Request) {
+	ruleID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if ruleID == "" {
+		writeError(w, http.StatusBadRequest, "rule id is required")
+		return
+	}
+	// получить данные,если запись уже есть в БД
+	rule, err := h.repository.Get(r.Context(), ruleID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ruleengine.ErrRuleNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	payload, err := decodeAdminRuleRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// копирование, т.к. rule *rules.Rule
+	var copiedRule adminRuleRequest
+	copiedRule.Name = rule.Name
+	copiedRule.AstroCondition = maps.Clone(rule.AstroCondition)
+	copy(copiedRule.ProductTags, rule.ProductTags)
+	copiedRule.Priority = &rule.Priority
+	copiedRule.IsActive = &rule.IsActive
+
+	// выполним проверки введенных данных
+	// если значения равны nil => пользователь не указал данные
+	if payload.Name != "" {
+		copiedRule.Name = payload.Name
+	}
+	if payload.AstroCondition != nil {
+		copiedRule.AstroCondition = maps.Clone(payload.AstroCondition)
+	}
+	if len(payload.ProductTags) > 0 {
+		copy(copiedRule.ProductTags, payload.ProductTags)
+	}
+	if payload.Priority != nil {
+		copiedRule.Priority = payload.Priority
+	}
+	if payload.IsActive != nil {
+		copiedRule.IsActive = payload.IsActive
+	}
+	// валидация
+	input, err := copiedRule.toRuleInput()
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	// воспользуемся матодом Update
+	updatedRule, err := h.repository.Update(r.Context(), ruleID, &input)
+
 	if err != nil {
 		if errors.Is(err, rules.ErrRuleNotFound) {
 			writeError(w, http.StatusNotFound, "astro rule not found")

@@ -120,15 +120,36 @@ func (r *fakeRulesRepository) Update(_ context.Context, id string, input *rules.
 	return parsedUUID, nil
 }
 
+func (r *fakeRulesRepository) Patch(_ context.Context, id string, input *rules.RuleInput) (uuid.UUID, error) {
+	currentRule, ok := r.items[id]
+	if !ok {
+		return uuid.Nil, rules.ErrRuleNotFound
+	}
+
+	currentRule.Name = input.Name
+	currentRule.AstroCondition = input.AstroCondition
+	currentRule.ProductTags = input.ProductTags
+	currentRule.Priority = input.Priority
+	currentRule.IsActive = input.IsActive
+	currentRule.UpdatedAt = time.Now().UTC()
+	r.items[id] = currentRule
+	parsedUUID, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	return parsedUUID, nil
+}
+
 func (r *fakeRulesRepository) Get(_ context.Context, id string) (*rules.Rule, error) {
 	currentRule, ok := r.items[id]
 	if !ok {
 		return nil, rules.ErrRuleNotFound
 	}
 
-	currentRule.Name = ""
-	currentRule.AstroCondition = map[string]string{}
-	currentRule.ProductTags = []string{}
+	currentRule.Name = "Ретроградный Меркурий"
+	currentRule.AstroCondition = map[string]string{"sign": "aries"}
+	currentRule.ProductTags = []string{"sport", "lux"}
 	currentRule.Priority = 1
 	currentRule.IsActive = true
 	currentRule.UpdatedAt = time.Now().UTC()
@@ -249,7 +270,6 @@ func TestRuleCreateSucceeds(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d, body=%s", response.Code, response.Body.String())
 	}
-	fmt.Println("epository.items[created-rule-id] = ", repository.items)
 
 	var resp Response
 	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
@@ -395,8 +415,6 @@ func TestRuleListFiltersByActiveFlag(t *testing.T) {
 	if !ok {
 		t.Fatal("expected response data.items to be a list")
 	}
-
-	fmt.Println("*******", items)
 
 	if len(items) != 1 {
 		t.Fatalf("expected one active rule, got %d", len(items))

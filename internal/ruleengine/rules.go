@@ -40,6 +40,7 @@ type Repository interface {
 	Create(ctx context.Context, input *RuleInput) (uuid.UUID, error)
 	Get(ctx context.Context, id string) (*Rule, error)
 	Update(ctx context.Context, id string, input *RuleInput) (uuid.UUID, error)
+	Patch(ctx context.Context, id string, input *RuleInput) (uuid.UUID, error)
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, options ListOptions) ([]*Rule, Metadata, error)
 	Deactivate(ctx context.Context, id string) (*Rule, error)

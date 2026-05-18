@@ -170,6 +170,56 @@ func (r *PostgresRepository) Update(ctx context.Context, id string, input *RuleI
 
 }
 
+// Update - метод обновляет конкретную запись в БД.
+func (r *PostgresRepository) Patch(ctx context.Context, id string, input *RuleInput) (uuid.UUID, error) {
+	if !Matches(id, uuidRegex) {
+		return uuid.Nil, ErrRuleNotFound
+	}
+
+	conditionJSON, tagsJSON, err := marshalRulePayload(*input)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	quary := `
+			UPDATE astro_rules
+			SET name = $2,
+			    astro_condition = $3::jsonb,
+			    product_tags = $4::jsonb,
+			    priority = $5,
+			    is_active = $6,
+			    updated_at = CURRENT_TIMESTAMP
+			WHERE id = $1
+			RETURNING id
+		`
+	ID, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	var dbID string
+	err = r.db.QueryRowContext(
+		ctx,
+		quary,
+		ID,
+		input.Name,
+		conditionJSON,
+		tagsJSON,
+		input.Priority,
+		input.IsActive,
+	).Scan(&dbID)
+
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	parsedUUID, err := uuid.Parse(dbID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	return parsedUUID, nil
+
+}
+
 // Delete - метод удаляет определнную запись в БД.
 func (r *PostgresRepository) Delete(ctx context.Context, id string) error {
 	if !Matches(id, uuidRegex) {
