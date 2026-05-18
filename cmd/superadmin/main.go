@@ -30,11 +30,12 @@ func run() error {
 		password string
 	)
 
+	cfg := config.Load()
+
 	flag.StringVar(&email, "email", os.Getenv("SUPERADMIN_EMAIL"), "SuperAdmin email, or SUPERADMIN_EMAIL")
 	flag.StringVar(&password, "password", os.Getenv("SUPERADMIN_PASSWORD"), "SuperAdmin password, or SUPERADMIN_PASSWORD")
 	flag.Parse()
 
-	cfg := config.Load()
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 

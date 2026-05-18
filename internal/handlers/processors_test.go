@@ -6,8 +6,10 @@ import (
 	"errors"
 	"testing"
 
+	"astroapi/internal/alisa"
 	almocks "astroapi/internal/alisa/mocks"
 	"astroapi/internal/handlers"
+	handlermocks "astroapi/internal/handlers/mocks"
 	"astroapi/internal/requests"
 	reqmocks "astroapi/internal/requests/mocks"
 	rulemocks "astroapi/internal/ruleengine/mocks"
@@ -24,6 +26,7 @@ func TestProfileProcessor_HappyPath(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
+	astroClient := handlermocks.NewMockAstroProfileGetter(ctrl)
 
 	reqRepo.EXPECT().
 		Get(gomock.Any(), "req-1").
@@ -31,14 +34,14 @@ func TestProfileProcessor_HappyPath(t *testing.T) {
 	reqRepo.EXPECT().
 		StartProcessing(gomock.Any(), "req-1").
 		Return(true, nil).Times(1)
-	userRepo.EXPECT().
-		Save(gomock.Any(), gomock.AssignableToTypeOf(user.User{})).
-		Return(nil).Times(1)
+	astroClient.EXPECT().
+		GetAstroProfileContext(gomock.Any(), "1990-01-01", "Moscow").
+		Return(alisa.AstroProfile{BirthDate: "1990-01-01", BirthPlace: "Moscow"}, nil).Times(1)
 	reqRepo.EXPECT().
-		UpdateStatus(gomock.Any(), "req-1", "completed", gomock.Nil(), "").
+		UpdateStatus(gomock.Any(), "req-1", requests.StatusCompleted, gomock.AssignableToTypeOf([]byte{}), "").
 		Return(nil).Times(1)
 
-	p := handlers.NewProfileProcessor(userRepo, reqRepo, zap.NewNop())
+	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, zap.NewNop())
 
 	payload, _ := json.Marshal(map[string]any{
 		"request_id": "req-1",
@@ -57,9 +60,11 @@ func TestProfileProcessor_ValidationError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
+	astroClient := handlermocks.NewMockAstroProfileGetter(ctrl)
+
 	// Save и UpdateStatus не должны вызываться
 
-	p := handlers.NewProfileProcessor(userRepo, reqRepo, zap.NewNop())
+	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, zap.NewNop())
 
 	payload, _ := json.Marshal(map[string]any{
 		"request_id": "req-1",
@@ -73,35 +78,39 @@ func TestProfileProcessor_ValidationError(t *testing.T) {
 	require.Contains(t, err.Error(), "validation")
 }
 
-func TestProfileProcessor_SaveFailureMarksRequestFailed(t *testing.T) {
+func TestProfileProcessor_AstroAPIFailureMarksRequestFailed(t *testing.T) {
 	t.Parallel()
 	ctrl := gomock.NewController(t)
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
+	astroClient := handlermocks.NewMockAstroProfileGetter(ctrl)
 
-	saveErr := errors.New("db down")
+	astroErr := errors.New("astro api down")
 	reqRepo.EXPECT().
 		Get(gomock.Any(), "req-1").
 		Return(requests.Request{RequestID: "req-1", Status: requests.StatusPending}, nil).Times(1)
 	reqRepo.EXPECT().
 		StartProcessing(gomock.Any(), "req-1").
 		Return(true, nil).Times(1)
-	userRepo.EXPECT().Save(gomock.Any(), gomock.Any()).Return(saveErr).Times(1)
+	astroClient.EXPECT().
+		GetAstroProfileContext(gomock.Any(), "1990-01-01", "Moscow").
+		Return(alisa.AstroProfile{}, astroErr).Times(1)
 	reqRepo.EXPECT().
-		UpdateStatus(gomock.Any(), "req-1", "failed", gomock.Nil(), gomock.Any()).
+		UpdateStatus(gomock.Any(), "req-1", requests.StatusFailed, gomock.Nil(), gomock.Any()).
 		Return(nil).Times(1)
 
-	p := handlers.NewProfileProcessor(userRepo, reqRepo, zap.NewNop())
+	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, zap.NewNop())
 	payload, _ := json.Marshal(map[string]any{
 		"request_id": "req-1",
 		"profile": map[string]any{
 			"user_id":       validUserID,
 			"birth_date":    "1990-01-01",
+			"birth_place":   "Moscow",
 			"consent_given": true,
 		},
 	})
 	err := p.Handle(context.Background(), payload)
-	require.ErrorIs(t, err, saveErr)
+	require.ErrorIs(t, err, astroErr)
 }
 
 func TestRecommendProcessor_HappyPath(t *testing.T) {
@@ -127,7 +136,7 @@ func TestRecommendProcessor_HappyPath(t *testing.T) {
 		UpdateStatus(gomock.Any(), "req-2", "completed", gomock.Any(), "").
 		Return(nil).Times(1)
 
-	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, zap.NewNop())
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, zap.NewNop())
 
 	payload, _ := json.Marshal(map[string]any{
 		"request_id": "req-2",
@@ -152,7 +161,7 @@ func TestRecommendProcessor_DuplicateCompletedIsSkipped(t *testing.T) {
 		Get(gomock.Any(), "req-dup").
 		Return(requests.Request{RequestID: "req-dup", Status: requests.StatusCompleted}, nil).Times(1)
 
-	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, zap.NewNop())
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, zap.NewNop())
 	payload, _ := json.Marshal(map[string]any{
 		"request_id": "req-dup",
 		"recommend": map[string]any{
@@ -176,7 +185,7 @@ func TestRecommendProcessor_ProcessingRequestIsNotCompleted(t *testing.T) {
 		Get(gomock.Any(), "req-processing").
 		Return(requests.Request{RequestID: "req-processing", Status: requests.StatusProcessing}, nil).Times(1)
 
-	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, zap.NewNop())
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, zap.NewNop())
 	payload, _ := json.Marshal(map[string]any{
 		"request_id": "req-processing",
 		"recommend": map[string]any{

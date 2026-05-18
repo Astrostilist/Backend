@@ -124,6 +124,15 @@ type stubAI struct{ reply string }
 
 func (s stubAI) Generate(context.Context, string) (string, error) { return s.reply, nil }
 
+type stubAstroClient struct {
+	profile alisa.AstroProfile
+	err     error
+}
+
+func (s stubAstroClient) GetAstroProfileContext(context.Context, string, string) (alisa.AstroProfile, error) {
+	return s.profile, s.err
+}
+
 type memPersonalDataRepo struct {
 	mu    sync.Mutex
 	items map[string]domain.PersonalData
@@ -206,8 +215,9 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	personalDataRepo := newMemPersonalDataRepo()
 	personalDataCache := newMemPersonalDataCache()
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(personalDataRepo, personalDataCache)
+	astroClient := stubAstroClient{profile: alisa.AstroProfile{BirthDate: "1990-01-01", BirthPlace: "Moscow"}}
 
-	profileProc := handlers.NewProfileProcessor(userRepo, reqRepo, logger)
+	profileProc := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, logger)
 	router := handlers.NewMsgRouter(logger)
 	router.Register(models.MsgProfileSubj, profileProc)
 
@@ -239,10 +249,13 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 		return ok && r.Status == requests.StatusCompleted
 	})
 
-	u, err := userRepo.Get(ctx, "123e4567-e89b-12d3-a456-426614174000")
-	require.NoError(t, err)
-	require.Equal(t, "1990-01-01", u.BirthDate)
-	require.True(t, u.ConsentGiven)
+	final, ok := reqRepo.lookup(requestID)
+	require.True(t, ok)
+	var profile alisa.AstroProfile
+	require.NoError(t, json.Unmarshal(final.Result, &profile))
+	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", profile.UserID)
+	require.Equal(t, "1990-01-01", profile.BirthDate)
+	require.Equal(t, "Moscow", profile.BirthPlace)
 }
 
 // TestE2E_RecommendPipeline: async POST /astro/recommend → NATS → RecommendProcessor
@@ -276,7 +289,7 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 	rulesRepo := &memRulesRepo{tags: []string{"luxury"}}
 	ai := stubAI{reply: "e2e response"}
 
-	proc := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, logger)
+	proc := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, logger)
 	router := handlers.NewMsgRouter(logger)
 	router.Register(models.MsgRecommendSubj, proc)
 
@@ -286,7 +299,7 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 			return router.Dispatch(c, msg.Subject(), msg.Data())
 		}))
 
-	h := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, ai, reqRepo, logger)
+	h := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, ai, nil, reqRepo, logger)
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -329,6 +342,7 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 }
 
 var (
-	_ handlers.RuleMatcher = (*memRulesRepo)(nil)
-	_ alisa.Generator      = stubAI{}
+	_ handlers.RuleMatcher        = (*memRulesRepo)(nil)
+	_ handlers.AstroProfileGetter = stubAstroClient{}
+	_ alisa.Generator             = stubAI{}
 )

@@ -23,6 +23,9 @@ func RequestLogger(logger *zap.Logger) func(http.Handler) http.Handler {
 				status = http.StatusOK
 			}
 
+			if r.URL.Path == "/metrics" {
+				return
+			}
 			logger.Info("HTTP request",
 				zap.String("method", r.Method),
 				zap.String("path", r.URL.Path),

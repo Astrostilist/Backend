@@ -242,7 +242,7 @@ func parseRulesListOptions(r *http.Request) (rules.ListOptions, error) {
 		limit = parsedLimit
 	}
 
-	offset := 0
+	offset := 1
 	if rawOffset := strings.TrimSpace(query.Get("page")); rawOffset != "" {
 		parsedOffset, err := strconv.Atoi(rawOffset)
 		if err != nil || parsedOffset < 0 {
@@ -258,6 +258,9 @@ func parseRulesListOptions(r *http.Request) (rules.ListOptions, error) {
 			return rules.ListOptions{}, errors.New("is_active must be true or false")
 		}
 		isActiveFilter = &parsedActive
+	} else {
+		dfltIsActive := true
+		isActiveFilter = &dfltIsActive
 	}
 
 	return rules.ListOptions{

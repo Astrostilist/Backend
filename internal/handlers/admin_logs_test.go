@@ -15,6 +15,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+const testAdminToken = "test-admin-token" // TPDO: убрать после починки логов admin_rules
+
 type fakeAdminLogsRepository struct {
 	items       []adminlogs.LogEntry
 	called      bool

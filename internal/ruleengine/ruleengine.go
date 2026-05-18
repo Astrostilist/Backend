@@ -32,7 +32,7 @@ func (r *PostgresRepository) Match(ctx context.Context, triggers []string) ([]st
 	}
 	defer func() {
 		if err = rows.Close(); err != nil {
-			r.logger.Warn("failed to close match rows", zap.Error(err))
+			r.logger.Error("failed to close match rows", zap.Error(err))
 		}
 	}()
 

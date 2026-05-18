@@ -157,6 +157,10 @@ func NewAstroAPIClientFromEnv(
 }
 
 func (c *AstroAPIClient) GetAstroProfile(birthDate, birthPlace string) (AstroProfile, error) {
+	return c.GetAstroProfileContext(context.Background(), birthDate, birthPlace)
+}
+
+func (c *AstroAPIClient) GetAstroProfileContext(ctx context.Context, birthDate, birthPlace string) (AstroProfile, error) {
 	var profile AstroProfile
 
 	if strings.TrimSpace(c.baseURL) == "" {
@@ -168,7 +172,7 @@ func (c *AstroAPIClient) GetAstroProfile(birthDate, birthPlace string) (AstroPro
 		timeout = defaultAstroProfileTimeout
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cacheKey := buildAstroProfileCacheKey(birthDate, birthPlace)
