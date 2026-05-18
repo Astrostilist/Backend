@@ -233,22 +233,22 @@ func (r adminRuleRequest) toRuleInput() (rules.RuleInput, error) {
 func parseRulesListOptions(r *http.Request) (rules.ListOptions, error) {
 	query := r.URL.Query()
 
-	limit := defaultRulesLimit
+	pageSize := defaultRulesLimit
 	if rawLimit := strings.TrimSpace(query.Get("page_size")); rawLimit != "" {
 		parsedLimit, err := strconv.Atoi(rawLimit)
 		if err != nil || parsedLimit < 1 || parsedLimit > maxRulesLimit {
 			return rules.ListOptions{}, errors.New("page_size (limit) must be an integer between 1 and 200")
 		}
-		limit = parsedLimit
+		pageSize = parsedLimit
 	}
 
-	offset := 1
+	page := 1
 	if rawOffset := strings.TrimSpace(query.Get("page")); rawOffset != "" {
 		parsedOffset, err := strconv.Atoi(rawOffset)
 		if err != nil || parsedOffset < 0 {
 			return rules.ListOptions{}, errors.New("page (offset) must be an integer greater than or equal to 0")
 		}
-		offset = parsedOffset
+		page = parsedOffset
 	}
 
 	var isActiveFilter *bool
@@ -265,8 +265,8 @@ func parseRulesListOptions(r *http.Request) (rules.ListOptions, error) {
 
 	return rules.ListOptions{
 		IsActive: isActiveFilter,
-		Limit:    limit,
-		Offset:   offset,
+		PageSize: pageSize,
+		Page:     page,
 	}, nil
 }
 

@@ -28,8 +28,8 @@ type RuleInput struct {
 
 type ListOptions struct {
 	IsActive *bool
-	Limit    int // pageSize
-	Offset   int // page
+	PageSize int // pageSize
+	Page     int // page
 }
 
 type ListResult struct {
@@ -70,9 +70,9 @@ func calculateMetadata(totalRecords, page, pageSize int) Metadata {
 }
 
 func (f ListOptions) limit() int {
-	return f.Limit
+	return f.PageSize
 }
 
 func (f ListOptions) offset() int {
-	return (f.Offset - 1) * f.Limit
+	return (f.Page - 1) * f.PageSize
 }

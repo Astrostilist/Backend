@@ -30,7 +30,7 @@ func newFakeRulesRepository(items []rules.Rule) *fakeRulesRepository {
 	return repository
 }
 func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions) ([]*rules.Rule, rules.Metadata, error) {
-	filtered := make([]rules.Rule, 0, len(r.items))
+	filtered := make([]rules.Rule, 0)
 	for _, item := range r.items {
 		if options.IsActive != nil && item.IsActive != *options.IsActive {
 			continue
@@ -45,26 +45,39 @@ func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions)
 		return filtered[i].Priority < filtered[j].Priority
 	})
 
-	start := min(options.Offset, len(filtered))
-
-	end := min(start+options.Limit, len(filtered))
-	mtdata := rules.Metadata{
-		CurrentPage:  options.Limit,
-		PageSize:     options.Limit,
-		FirstPage:    start,
-		LastPage:     end,
-		TotalRecords: len(filtered),
+	totalRecords := len(filtered)
+	offset := (options.Page - 1) * options.PageSize
+	if offset < 0 {
+		offset = 0
 	}
 
-	var subFiltered []*rules.Rule
-	subFiltered = make([]*rules.Rule, 0)
+	start := offset
+	if start > totalRecords {
+		start = totalRecords
+	}
+
+	end := start + options.PageSize
+	if end > totalRecords {
+		end = totalRecords
+	}
+	totalPages := 0
+	if options.PageSize > 0 {
+		totalPages = (totalRecords + options.PageSize - 1) / options.PageSize
+	}
+	metadata := rules.Metadata{
+		CurrentPage:  options.Page,
+		PageSize:     options.PageSize,
+		FirstPage:    1,
+		LastPage:     totalPages,
+		TotalRecords: totalRecords,
+	}
+
+	subFiltered := make([]*rules.Rule, 0)
 	for i := start; i < end; i++ {
 		subFiltered = append(subFiltered, &filtered[i])
 	}
-	// subFiltered := filtered[start:end]
-	// myPointer := &subFiltered
 
-	return subFiltered, mtdata, nil
+	return subFiltered, metadata, nil
 }
 func (r *fakeRulesRepository) Create(_ context.Context, input *rules.RuleInput) (uuid.UUID, error) {
 	now := time.Now().UTC()
@@ -164,7 +177,7 @@ func TestAdminRulesRequireToken(t *testing.T) {
 	}
 }
 
-func TestCreateRuleRejectsNegativePriority(t *testing.T) {
+func TestRuleCreateRejectsNegativePriority(t *testing.T) {
 	t.Parallel()
 
 	payload := []byte(`{"name":"Retrograde rule","astro_condition":{"planet":"mars"},"product_tags":["energy"],"priority":-1}`)
@@ -180,7 +193,7 @@ func TestCreateRuleRejectsNegativePriority(t *testing.T) {
 	}
 }
 
-func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
+func TestRuleDeleteSoftDeletesRecord(t *testing.T) {
 	t.Parallel()
 
 	smplID, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
@@ -221,7 +234,7 @@ func TestDeleteRuleSoftDeletesRecord(t *testing.T) {
 	}
 }
 
-func TestCreateRuleSucceeds(t *testing.T) {
+func TestRuleCreateSucceeds(t *testing.T) {
 	t.Parallel()
 
 	repository := newFakeRulesRepository(nil)
@@ -269,7 +282,7 @@ func TestCreateRuleSucceeds(t *testing.T) {
 	// }
 }
 
-func TestUpdateRuleModifiesFields(t *testing.T) {
+func TestRuleUpdateModifiesFields(t *testing.T) {
 	t.Parallel()
 
 	ruleID, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
@@ -307,7 +320,7 @@ func TestUpdateRuleModifiesFields(t *testing.T) {
 	}
 }
 
-func TestUpdateRuleNotFound(t *testing.T) {
+func TestRuleUpdateNotFound(t *testing.T) {
 	t.Parallel()
 
 	payload := []byte(`{"name":"X","astro_condition":{"a":"b"},"product_tags":["t"],"priority":1,"is_active":true}`)
@@ -323,7 +336,7 @@ func TestUpdateRuleNotFound(t *testing.T) {
 	}
 }
 
-func TestListRulesFiltersByActiveFlag(t *testing.T) {
+func TestRuleListFiltersByActiveFlag(t *testing.T) {
 	t.Parallel()
 	smplID1, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
 	require.NoError(t, err)
@@ -357,7 +370,7 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 		},
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules?is_active=true&limit=50&offset=0", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules?is_active=true&page_size=50&page=1", nil)
 	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
@@ -383,6 +396,8 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 		t.Fatal("expected response data.items to be a list")
 	}
 
+	fmt.Println("*******", items)
+
 	if len(items) != 1 {
 		t.Fatalf("expected one active rule, got %d", len(items))
 	}
@@ -395,9 +410,18 @@ func TestListRulesFiltersByActiveFlag(t *testing.T) {
 	if item["is_active"] != true {
 		t.Fatal("expected filtered item to be active")
 	}
+
+	ctx := context.Background()
+	result, metadata, err := repository.List(ctx, rules.ListOptions{
+		IsActive: func() *bool { b := true; return &b }(),
+		Page:     1,
+		PageSize: 50,
+	})
+	require.NoError(t, err)
+	t.Logf("Direct call - got %d rules, metadata: %+v", len(result), metadata)
 }
 
-func TestGetRuleFiltersByActiveFlag(t *testing.T) {
+func TestRuleGetFiltersByActiveFlag(t *testing.T) {
 	t.Parallel()
 	smplID1, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
 	require.NoError(t, err)

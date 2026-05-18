@@ -267,7 +267,7 @@ func (r *PostgresRepository) List(ctx context.Context, options ListOptions) ([]*
 		return nil, Metadata{}, err
 	}
 
-	metadata := calculateMetadata(totalRecords, options.Limit, options.Offset)
+	metadata := calculateMetadata(totalRecords, options.PageSize, options.Page)
 	return rules, metadata, nil
 }
 
