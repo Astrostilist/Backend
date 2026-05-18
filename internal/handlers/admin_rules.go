@@ -10,7 +10,6 @@ import (
 	"strings"
 	"unicode"
 
-	"astroapi/internal/ruleengine"
 	rules "astroapi/internal/ruleengine"
 
 	"github.com/go-chi/chi/v5"
@@ -162,7 +161,7 @@ func (h *AdminRulesHandler) PatchRule(w http.ResponseWriter, r *http.Request) {
 	rule, err := h.repository.Get(r.Context(), ruleID)
 	if err != nil {
 		switch {
-		case errors.Is(err, ruleengine.ErrRuleNotFound):
+		case errors.Is(err, rules.ErrRuleNotFound):
 			writeError(w, http.StatusNotFound, err.Error())
 		default:
 			writeError(w, http.StatusInternalServerError, err.Error())

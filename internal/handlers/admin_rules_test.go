@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -275,7 +274,6 @@ func TestRuleCreateSucceeds(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
 		t.Fatalf("cannot be decoded body: %v\n", err)
 	}
-	fmt.Printf("%v %T\n", resp.Data, resp.Data)
 
 	bytes, _ := json.Marshal(resp.Data)
 	output := make(map[string]string)
