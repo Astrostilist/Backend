@@ -151,37 +151,40 @@ func beginRequestProcessing(
 ) (bool, error) {
 	req, err := repo.Get(ctx, requestID)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("get request before processing: %w", err)
 	}
-	if req.Status == requests.StatusCompleted {
+	if len(req.Result) > 0 {
 		logger.Info("skipping duplicate request_id", zap.String("request_id", requestID))
 		return false, nil
 	}
-	if req.Status != requests.StatusPending {
-		logger.Info("request is not pending, skip processing",
-			zap.String("request_id", requestID), zap.String("status", req.Status))
+	if req.Status == requests.StatusFailed && req.AttemptCount >= requests.MaxProcessingAttempts {
+		logger.Info("request already exhausted attempts, skip processing",
+			zap.String("request_id", requestID),
+			zap.Int("attempt_count", req.AttemptCount))
 		return false, nil
 	}
 
 	started, err := repo.StartProcessing(ctx, requestID)
 	if err != nil {
-		// TODO:
-		// разобраться с процессом. Обработчик должен либо обрабатывать запрос до состояния completed,
-		// либо возвращать ошибку. Иначе у нас и запрос не обработан и сообщение из очереди удалено
-		return false, fmt.Errorf("request is not pending, skip processing")
+		return false, fmt.Errorf("start request processing: %w", err)
 	}
 	if !started {
 		current, getErr := repo.Get(ctx, requestID)
 		if getErr != nil {
-			return false, getErr
+			return false, fmt.Errorf("get request after start conflict: %w", getErr)
 		}
-		if current.Status == requests.StatusCompleted {
+		if len(current.Result) > 0 {
 			logger.Info("skipping duplicate request_id", zap.String("request_id", requestID))
 			return false, nil
 		}
-		logger.Info("request was locked by another worker",
-			zap.String("request_id", requestID), zap.String("status", current.Status))
-		return false, nil
+		if current.Status == requests.StatusFailed && current.AttemptCount >= requests.MaxProcessingAttempts {
+			logger.Info("request already exhausted attempts, skip processing",
+				zap.String("request_id", requestID),
+				zap.Int("attempt_count", current.AttemptCount))
+			return false, nil
+		}
+		return false, fmt.Errorf("request %s has no result_payload and cannot start processing: status=%s attempt_count=%d",
+			requestID, current.Status, current.AttemptCount)
 	}
 	return true, nil
 }
@@ -222,13 +225,13 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 
 	if p.astroClient == nil {
 		err := errors.New("astro profile client is not configured")
-		p.markFailed(ctx, msg.RequestID, err, "profile")
+		p.markRetryOrFailed(ctx, msg.RequestID, err, "profile")
 		return err
 	}
 
 	profile, err := p.astroClient.GetAstroProfileContext(ctx, msg.Profile.BirthDate, msg.Profile.BirthPlace)
 	if err != nil {
-		p.markFailed(ctx, msg.RequestID, err, "profile")
+		p.markRetryOrFailed(ctx, msg.RequestID, err, "profile")
 		return fmt.Errorf("astro api profile: %w", err)
 	}
 	profile.UserID = msg.Profile.UserID
@@ -244,7 +247,7 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 
 	resultJSON, err := json.Marshal(profile)
 	if err != nil {
-		p.markFailed(ctx, msg.RequestID, err, "profile")
+		p.markRetryOrFailed(ctx, msg.RequestID, err, "profile")
 		return fmt.Errorf("marshal astro profile: %w", err)
 	}
 
@@ -259,10 +262,29 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 	return nil
 }
 
-func (p *ProfileProcessor) markFailed(ctx context.Context, requestID string, err error, worker string) {
-	if updateErr := p.requestsRepo.UpdateStatus(ctx, requestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
-		p.logger.Error("failed to mark request as failed", zap.String("worker", worker), zap.Error(updateErr))
+func (p *ProfileProcessor) markRetryOrFailed(ctx context.Context, requestID string, err error, worker string) {
+	status := p.nextFailureStatus(ctx, requestID, worker)
+	if updateErr := p.requestsRepo.UpdateStatus(ctx, requestID, status, nil, err.Error()); updateErr != nil {
+		p.logger.Error("failed to mark request after processing error",
+			zap.String("worker", worker),
+			zap.String("status", status),
+			zap.Error(updateErr))
 	}
+}
+
+func (p *ProfileProcessor) nextFailureStatus(ctx context.Context, requestID string, worker string) string {
+	status := requests.StatusRetry
+	req, err := p.requestsRepo.Get(ctx, requestID)
+	if err != nil {
+		p.logger.Warn("failed to read attempt_count before retry update",
+			zap.String("worker", worker),
+			zap.Error(err))
+		return status
+	}
+	if req.AttemptCount+1 >= requests.MaxProcessingAttempts {
+		status = requests.StatusFailed
+	}
+	return status
 }
 
 // RecommendProcessor обрабатывает сообщения astro.events.recommend.
@@ -294,6 +316,31 @@ func NewRecommendProcessor(
 	}
 }
 
+func (p *RecommendProcessor) markRetryOrFailed(ctx context.Context, requestID string, err error, worker string) {
+	status := p.nextFailureStatus(ctx, requestID, worker)
+	if updateErr := p.requestsRepo.UpdateStatus(ctx, requestID, status, nil, err.Error()); updateErr != nil {
+		p.logger.Error("failed to mark request after processing error",
+			zap.String("worker", worker),
+			zap.String("status", status),
+			zap.Error(updateErr))
+	}
+}
+
+func (p *RecommendProcessor) nextFailureStatus(ctx context.Context, requestID string, worker string) string {
+	status := requests.StatusRetry
+	req, err := p.requestsRepo.Get(ctx, requestID)
+	if err != nil {
+		p.logger.Warn("failed to read attempt_count before retry update",
+			zap.String("worker", worker),
+			zap.Error(err))
+		return status
+	}
+	if req.AttemptCount+1 >= requests.MaxProcessingAttempts {
+		status = requests.StatusFailed
+	}
+	return status
+}
+
 func (p *RecommendProcessor) Handle(ctx context.Context, payload []byte) error {
 	var msg recommendPayload
 	if err := json.Unmarshal(payload, &msg); err != nil {
@@ -310,17 +357,13 @@ func (p *RecommendProcessor) Handle(ctx context.Context, payload []byte) error {
 
 	result, err := buildRecommendation(ctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient, p.astroClient, p.logger)
 	if err != nil {
-		if updateErr := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
-			p.logger.Error("failed to mark recommend request as failed", zap.Error(updateErr))
-		}
-		return err
+		p.markRetryOrFailed(ctx, msg.RequestID, err, "recommend")
+		return fmt.Errorf("recommend processing failed: %w", err)
 	}
 
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		if updateErr := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
-			p.logger.Error("failed to mark recommend request as failed", zap.Error(updateErr))
-		}
+		p.markRetryOrFailed(ctx, msg.RequestID, err, "recommend")
 		return fmt.Errorf("marshal recommendation: %w", err)
 	}
 	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {

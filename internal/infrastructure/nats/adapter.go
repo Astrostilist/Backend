@@ -21,7 +21,7 @@ type NATSConn struct {
 	logger *zap.Logger
 }
 
-var backOff = [4]time.Duration{
+var defaultBackOff = [4]time.Duration{
 	5 * time.Second,
 	30 * time.Second,
 	5 * time.Minute,
@@ -118,14 +118,12 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 	consumersCfg := []jetstream.ConsumerConfig{
 		{
 			Name: models.MsgProfileWrk,
-			// точный subject + (опциональный) хвост на будущее: `astro.events.profile`
-			// и любые `astro.events.profile.*` (fan-out по request_id и т.п.)
 			FilterSubjects:    []string{models.MsgProfileSubj, fmt.Sprint(models.MsgProfileSubj, ".>")},
 			AckPolicy:         jetstream.AckExplicitPolicy,
 			ReplayPolicy:      jetstream.ReplayInstantPolicy,
 			AckWait:           30 * time.Second,
 			MaxAckPending:     1000,
-			MaxDeliver:        models.MsgSMaxRetries * 5,
+			MaxDeliver:        models.MsgSMaxRetries,
 			InactiveThreshold: 24 * time.Hour,
 		},
 		{
@@ -135,7 +133,7 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 			ReplayPolicy:      jetstream.ReplayInstantPolicy,
 			AckWait:           30 * time.Second,
 			MaxAckPending:     1000,
-			MaxDeliver:        models.MsgSMaxRetries * 5,
+			MaxDeliver:        models.MsgSMaxRetries,
 			InactiveThreshold: 24 * time.Hour,
 		},
 	}
@@ -199,7 +197,7 @@ func (r *JetStreamAdapter) publishToDLQ(ctx context.Context, originalMsg jetstre
 		Data:    originalMsg.Data(),
 		Subject: subject,
 		Header: nats.Header{
-			"original_subject": {subject},
+			"original_subject": {origsubject},
 			"original_msg_id":  {strconv.FormatUint(id, 10)},
 			"failure_reason":   {reason},
 			"timestamp":        {time.Now().UTC().Format(time.RFC3339)},
@@ -221,7 +219,7 @@ func (r *JetStreamAdapter) publishToDLQ(ctx context.Context, originalMsg jetstre
 	metrics.IncdlqMessagesTotal()
 
 	r.logger.Warn("Message sent to DLQ",
-		zap.String("original_subject", subject),
+		zap.String("original_subject", origsubject),
 		zap.String("dlq_subject", subject),
 		zap.String("reason", reason),
 		zap.Uint64("message_id", ack.Sequence))

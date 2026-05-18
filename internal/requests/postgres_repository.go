@@ -7,6 +7,8 @@ import (
 	"fmt"
 )
 
+const processingStaleInterval = "2 minutes"
+
 // PostgresRepository — реализация Repository поверх PostgreSQL.
 type PostgresRepository struct {
 	db *sql.DB
@@ -33,17 +35,37 @@ func (r *PostgresRepository) Create(ctx context.Context, req Request) error {
 	return nil
 }
 
-// StartProcessing атомарно переводит запрос из pending в processing.
-// На вход принимает контекст и request_id, на выход возвращает флаг успешного старта и ошибку.
+// StartProcessing атомарно переводит запрос в processing, если нет готового результата.
+// Повторная доставка может продолжить pending/retry; processing разрешён только
+// после stale-интервала, чтобы не запустить параллельный дубль обработки. Старые
+// failed записи восстанавливаются до достижения лимита попыток.
 func (r *PostgresRepository) StartProcessing(ctx context.Context, requestID string) (bool, error) {
 	const query = `
 		UPDATE requests_log
-		SET status     = $2,
+		SET status = $2,
 		    updated_at = CURRENT_TIMESTAMP,
 		    completed_at = NULL
-		WHERE request_id = $1 AND status = $3
+		WHERE request_id = $1
+		  AND result_payload IS NULL
+		  AND (
+			status IN ($3, $4)
+			OR (
+				status = $5
+				AND updated_at < CURRENT_TIMESTAMP - ($6::text)::interval
+			)
+			OR (status = $7 AND attempt_count < $8)
+		  )
 	`
-	res, err := r.db.ExecContext(ctx, query, requestID, StatusProcessing, StatusPending)
+	res, err := r.db.ExecContext(ctx, query,
+		requestID,
+		StatusProcessing,
+		StatusPending,
+		StatusRetry,
+		StatusProcessing,
+		processingStaleInterval,
+		StatusFailed,
+		MaxProcessingAttempts,
+	)
 	if err != nil {
 		return false, fmt.Errorf("start processing requests_log: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +77,10 @@ func (m *memRequestsRepo) StartProcessing(_ context.Context, id string) (bool, e
 	if !ok {
 		return false, requests.ErrNotFound
 	}
-	if r.Status != requests.StatusPending {
+	canStart := len(r.Result) == 0 && (r.Status == requests.StatusPending ||
+		r.Status == requests.StatusRetry ||
+		(r.Status == requests.StatusFailed && r.AttemptCount < requests.MaxProcessingAttempts))
+	if !canStart {
 		return false, nil
 	}
 	r.Status = requests.StatusProcessing
@@ -190,8 +194,6 @@ func startNATS(t *testing.T) (host, port string) {
 
 // ---- e2e ------------------------------------------------------------
 
-// TestE2E_ProfilePipeline: HTTP POST /astro/profile → NATS → ProfileProcessor
-// сохраняет пользователя и апдейтит результат генерации в статус completed.
 func TestE2E_ProfilePipeline(t *testing.T) {
 	host, port := startNATS(t)
 
@@ -326,6 +328,105 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 	require.NoError(t, json.Unmarshal(final.Result, &res))
 	require.Equal(t, "e2e response", res.Text)
 	require.Equal(t, []string{"luxury"}, res.Tags)
+}
+
+// TestE2E_ProfileFailureAfterFiveAttemptsGoesToDLQ проверяет полный retry/DLQ pipeline:
+// HTTP POST /astro/profile → NATS → ProfileProcessor получает 5 ошибок Astro API →
+// requests_log переходит в failed, а исходное сообщение появляется в astro.dlq.profile.
+func TestE2E_ProfileFailureAfterFiveAttemptsGoesToDLQ(t *testing.T) {
+	host, port := startNATS(t)
+
+	logger := zap.NewNop()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := &config.Config{NATSHost: host, NATSPort: port}
+	conn, err := natsinfra.InitNATS(ctx, logger, cfg)
+	require.NoError(t, err)
+	defer conn.DrainNATS()
+
+	js, err := jetstream.New(conn.Conn)
+	require.NoError(t, err)
+	adapter := natsinfra.NewJetStreamRepository(js, logger)
+	require.NoError(t, adapter.InitializeStreams(ctx))
+
+	publisher := natsinfra.NewMessagePublisher(adapter)
+	userRepo := newMemUserRepo()
+	reqRepo := newMemRequestsRepo()
+	personalDataRepo := newMemPersonalDataRepo()
+	personalDataCache := newMemPersonalDataCache()
+	personalDataUC := usecases.NewProcessPersonalDataUseCase(personalDataRepo, personalDataCache)
+	astroErr := errors.New("astro upstream returned 500")
+	astroClient := stubAstroClient{err: astroErr}
+
+	profileProc := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, logger)
+	router := handlers.NewMsgRouter(logger)
+	router.Register(models.MsgProfileSubj, profileProc)
+
+	consumer := natsinfra.NewMessageConsumer(adapter)
+	consumer.SetBackOffForTest([4]time.Duration{
+		10 * time.Millisecond,
+		10 * time.Millisecond,
+		10 * time.Millisecond,
+		10 * time.Millisecond,
+	})
+	require.NoError(t, consumer.ConsumeWithHandler(ctx, models.MsgStreamEvents, models.MsgProfileWrk,
+		func(c context.Context, msg jetstream.Msg) error {
+			return router.Dispatch(c, msg.Subject(), msg.Data())
+		}))
+
+	h := handlers.NewProfileHandler(publisher, reqRepo, personalDataUC, logger)
+	body := []byte(`{
+		"user_id":"123e4567-e89b-12d3-a456-426614174001",
+		"birth_date":"1991-02-03",
+		"birth_place":"Moscow",
+		"consent_given":true
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/profile", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.HandleProfile(rr, req)
+	require.Equal(t, http.StatusAccepted, rr.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	requestID := resp["request_id"]
+	require.NotEmpty(t, requestID)
+
+	waitFor(t, 5*time.Second, func() bool {
+		r, ok := reqRepo.lookup(requestID)
+		return ok && r.Status == requests.StatusFailed && r.AttemptCount == requests.MaxProcessingAttempts
+	})
+
+	final, ok := reqRepo.lookup(requestID)
+	require.True(t, ok)
+	require.Equal(t, requests.StatusFailed, final.Status)
+	require.Equal(t, requests.MaxProcessingAttempts, final.AttemptCount)
+	require.Contains(t, final.ErrorReason, astroErr.Error())
+	require.Empty(t, final.Result)
+
+	dlqReader := natsinfra.NewDLQReader(adapter, logger)
+	waitFor(t, 5*time.Second, func() bool {
+		messages, err := dlqReader.GetMessages(ctx)
+		if err != nil {
+			return false
+		}
+		for _, message := range messages {
+			if message.Subject != "astro.dlq.profile" {
+				continue
+			}
+			if len(message.Headers["original_subject"]) == 0 || message.Headers["original_subject"][0] != models.MsgProfileSubj {
+				continue
+			}
+			if len(message.Headers["failure_reason"]) == 0 {
+				continue
+			}
+			if !bytes.Contains([]byte(message.Data), []byte(requestID)) {
+				continue
+			}
+			return true
+		}
+		return false
+	})
 }
 
 // waitFor поллит условие с коротким шагом, чтобы не зависеть от фиксированных sleep.

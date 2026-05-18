@@ -154,7 +154,9 @@ func TestStartProcessing_PendingToProcessing(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectExec(`UPDATE requests_log`).
-		WithArgs("req-1", requests.StatusProcessing, requests.StatusPending).
+		WithArgs("req-1", requests.StatusProcessing, requests.StatusPending,
+			requests.StatusRetry, requests.StatusProcessing, "2 minutes", requests.StatusFailed,
+			requests.MaxProcessingAttempts).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	started, err := repo.StartProcessing(context.Background(), "req-1")
@@ -169,11 +171,30 @@ func TestStartProcessing_StatusConflict(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectExec(`UPDATE requests_log`).
-		WithArgs("req-1", requests.StatusProcessing, requests.StatusPending).
+		WithArgs("req-1", requests.StatusProcessing, requests.StatusPending,
+			requests.StatusRetry, requests.StatusProcessing, "2 minutes", requests.StatusFailed,
+			requests.MaxProcessingAttempts).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	started, err := repo.StartProcessing(context.Background(), "req-1")
 	require.NoError(t, err)
 	require.False(t, started)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestStartProcessing_QueryGuardsProcessingByStaleTimestamp(t *testing.T) {
+	t.Parallel()
+	repo, db, mock := newRepo(t)
+	defer db.Close()
+
+	mock.ExpectExec(`status = \$5[\s\S]*updated_at < CURRENT_TIMESTAMP - \(\$6::text\)::interval`).
+		WithArgs("req-stale", requests.StatusProcessing, requests.StatusPending,
+			requests.StatusRetry, requests.StatusProcessing, "2 minutes", requests.StatusFailed,
+			requests.MaxProcessingAttempts).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	started, err := repo.StartProcessing(context.Background(), "req-stale")
+	require.NoError(t, err)
+	require.True(t, started)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
