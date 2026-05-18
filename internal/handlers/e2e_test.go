@@ -16,6 +16,7 @@ import (
 	"astroapi/internal/alisa"
 	"astroapi/internal/handlers"
 	natsinfra "astroapi/internal/infrastructure/nats"
+	"astroapi/internal/metrics"
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
 	"astroapi/internal/usecases"
@@ -194,6 +195,8 @@ func startNATS(t *testing.T) (host, port string) {
 
 // ---- e2e ------------------------------------------------------------
 
+// TestE2E_ProfilePipeline: HTTP POST /astro/profile → NATS → ProfileProcessor
+// сохраняет пользователя и апдейтит результат генерации в статус completed.
 func TestE2E_ProfilePipeline(t *testing.T) {
 	host, port := startNATS(t)
 
@@ -334,6 +337,8 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 // HTTP POST /astro/profile → NATS → ProfileProcessor получает 5 ошибок Astro API →
 // requests_log переходит в failed, а исходное сообщение появляется в astro.dlq.profile.
 func TestE2E_ProfileFailureAfterFiveAttemptsGoesToDLQ(t *testing.T) {
+	metrics.Initialize(&config.Config{Environment: "test", LogServiceName: "handlers-e2e"})
+
 	host, port := startNATS(t)
 
 	logger := zap.NewNop()
