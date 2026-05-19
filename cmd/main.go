@@ -19,6 +19,7 @@ import (
 	"astroapi/internal/alisa"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
+	"astroapi/internal/importer"
 	infra "astroapi/internal/infrastructure"
 	health "astroapi/internal/infrastructure/health"
 	natsinfra "astroapi/internal/infrastructure/nats"
@@ -127,6 +128,7 @@ func run() error {
 	requestsRepo := requests.NewPostgresRepository(db.DB)
 	adminLogsRepo := adminlogs.NewPostgresRepository(db.DB)
 	rulesRepo := rules.NewPostgresRepository(db.DB, zapLogger)
+	importerCsv := importer.NewPostgresRepository(db.DB, zapLogger)
 	productsRepo := products.NewPostgresRepository(db.DB)
 	adminRepo := admin.NewPostgresRepository(db.DB)
 
@@ -200,6 +202,7 @@ func run() error {
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, astroClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
+	importerCsvHandler := handlers.NewAdminImportHandler(importerCsv)
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
 	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
 	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
@@ -225,9 +228,9 @@ func run() error {
 	})
 
 	r.Post("/api/v1/auth/login", authHandler.Login)
-	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
 
 	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
+	handlers.RegisterAdminImportRoutes(r, cfg.AdminToken, importerCsvHandler)
 	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
 	handlers.RegisterAdminLogsRoutes(r, cfg.AdminToken, adminLogsHandler)
 
