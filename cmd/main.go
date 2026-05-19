@@ -27,11 +27,10 @@ import (
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
 	"astroapi/internal/products"
-	feedbackrepo "astroapi/internal/repositories"
+	repositories "astroapi/internal/repositories"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
 	"astroapi/internal/usecases"
-	repositories "astroapi/internal/usecases/repositories"
 	"astroapi/internal/user"
 
 	"github.com/go-chi/chi/v5"
@@ -134,6 +133,12 @@ func run() error {
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
 
+	userRepositoryDelete := repositories.NewUserRepository(db.DB)
+	h := &handlers.Handler{
+		Repo:   userRepositoryDelete,
+		Logger: zapLogger,
+	}
+
 	healthRepo := health.NewHealthServiceRepo(db, natsConn)
 	monitor := infra.NewMonitorService(jsAdapter, healthRepo, zapLogger)
 
@@ -203,7 +208,7 @@ func run() error {
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
 	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
 	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
-	feedbackHandler := handlers.NewFeedbackHandler(feedbackrepo.NewFeedbackRepository(db.DB))
+	feedbackHandler := handlers.NewFeedbackHandler(repositories.NewFeedbackRepository(db.DB))
 
 	dlqReader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqReader, zapLogger)
@@ -222,6 +227,7 @@ func run() error {
 		r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 		r.Post("/api/v1/feedback", feedbackHandler.CreateFeedback)
 		r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
+		r.Delete("/api/v1/user/{user_id}", h.OblivionHandler)
 	})
 
 	r.Post("/api/v1/auth/login", authHandler.Login)

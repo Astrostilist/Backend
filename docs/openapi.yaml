@@ -589,9 +589,57 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-
-# ─── Components ──────────────────────────────────────────────────────────────
-
+  /api/v1/user/{user_id}:
+    delete:
+      summary: Delete user
+      description: | 
+       Удаление данных пользователя.
+       Операция удаляет:
+       - users — основная запись;
+       - user_consents — история согласий;
+       - generation_results — результаты генерации для пользователя;
+       - feedback — обратная связь от пользователя.
+      tags: [Client API]
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        description: User identifier
+        schema:
+          type: string
+      responses:
+        "204":
+          description: User deleted successfully
+        "400":
+           description: Invalid request
+           content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              examples:
+                emptyUserId:
+                  value:
+                    error: id is required
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              examples:
+                userNotFound:
+                  value:
+                    error: user not found
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              examples:
+                internalError:
+                  value:
+                    error: internal server error
 components:
   securitySchemes:
     botAuth:

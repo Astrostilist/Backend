@@ -2,7 +2,7 @@ package repositories
 
 import (
 	"astroapi/internal/crypto"
-	"astroapi/internal/usecases/repositories/domain"
+	"astroapi/internal/repositories/domain"
 	"context"
 	"database/sql"
 	"fmt"

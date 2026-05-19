@@ -1,7 +1,7 @@
 package repositories
 
 import (
-	"astroapi/internal/usecases/repositories/domain"
+	"astroapi/internal/repositories/domain"
 	"context"
 	"encoding/json"
 	"errors"
