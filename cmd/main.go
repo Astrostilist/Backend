@@ -200,7 +200,7 @@ func run() error {
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, astroClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
-	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
+	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil, zapLogger)
 	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
 	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
 	feedbackHandler := handlers.NewFeedbackHandler(feedbackrepo.NewFeedbackRepository(db.DB))
