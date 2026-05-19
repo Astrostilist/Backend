@@ -37,6 +37,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nats-io/nats.go/jetstream"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.uber.org/zap"
 )
 
@@ -88,6 +93,11 @@ func run() error {
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
+
+	tp, err := initTracer(rootCtx, cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	db, err := database.New(rootCtx, cfg)
 	if err != nil {
@@ -210,6 +220,8 @@ func run() error {
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
+	r.Use(astromidware.TraceMiddleware(cfg.JaegerServiceName))
+	r.Use(astromidware.ZapWithTrace(zapLogger))
 	r.Use(astromidware.RequestMetricsMiddleware())
 	r.Use(astromidware.RequestLogger(zapLogger))
 	r.Use(middleware.Recoverer)
@@ -274,6 +286,12 @@ func run() error {
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancelShutdown()
 
+	defer func() {
+		if err := tp.Shutdown(shutdownCtx); err != nil {
+			zapLogger.Error("error shutting down tracer provider: %v", zap.Error(err))
+		}
+	}()
+
 	if shutdownErr := srv.Shutdown(shutdownCtx); shutdownErr != nil {
 		zapLogger.Error("server shutdown error", zap.Error(shutdownErr))
 	}
@@ -323,4 +341,35 @@ func decodeEncryptionKey(encoded string) ([]byte, error) {
 	}
 
 	return key, nil
+}
+
+func initTracer(ctx context.Context, cfg *config.Config) (*sdktrace.TracerProvider, error) {
+	println(cfg.JaegerOtelEndpoint)
+	exporter, err := otlptracehttp.New(ctx,
+		otlptracehttp.WithEndpoint("jaeger:4318"),
+		otlptracehttp.WithInsecure(),
+		otlptracehttp.WithTimeout(cfg.JaegerSendTimeout),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceName(cfg.JaegerServiceName),
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.JaegerSamplingRate))),
+	)
+
+	otel.SetTracerProvider(tp)
+
+	return tp, nil
 }
