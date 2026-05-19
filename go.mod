@@ -1,6 +1,8 @@
 module astroapi
 
-go 1.25.1
+go 1.25.0
+
+replace github.com/golang/mock => go.uber.org/mock v0.6.0
 
 require (
 	github.com/go-chi/chi/v5 v5.2.5

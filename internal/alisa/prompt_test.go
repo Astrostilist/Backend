@@ -1,12 +1,18 @@
 package alisa
 
 import (
+	"astroapi/internal/logger"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestBuildPrompt(t *testing.T) {
+	zapLogger, err := logger.NewLogger("tests", "debug")
+	if err != nil {
+		return
+	}
+
 	profile := AstroProfile{
 		UserID:     "123e4567-e89b-12d3-a456-426614174000",
 		BirthDate:  "1990-01-01",
@@ -27,7 +33,8 @@ func TestBuildPrompt(t *testing.T) {
 			prompt := BuildPrompt(tt.scenario, profile, map[string]any{
 				"budget": "10000",
 				"season": "winter",
-			})
+			},
+				zapLogger)
 
 			require.NotEmpty(t, prompt)
 			require.Contains(t, prompt, profile.BirthDate)

@@ -120,21 +120,23 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 			Name: models.MsgProfileWrk,
 			// точный subject + (опциональный) хвост на будущее: `astro.events.profile`
 			// и любые `astro.events.profile.*` (fan-out по request_id и т.п.)
-			FilterSubjects: []string{models.MsgProfileSubj, fmt.Sprint(models.MsgProfileSubj, ".>")},
-			AckPolicy:      jetstream.AckExplicitPolicy,
-			ReplayPolicy:   jetstream.ReplayInstantPolicy,
-			AckWait:        30 * time.Second,
-			MaxAckPending:  1000,
-			BackOff:        backOff[:],
+			FilterSubjects:    []string{models.MsgProfileSubj, fmt.Sprint(models.MsgProfileSubj, ".>")},
+			AckPolicy:         jetstream.AckExplicitPolicy,
+			ReplayPolicy:      jetstream.ReplayInstantPolicy,
+			AckWait:           30 * time.Second,
+			MaxAckPending:     1000,
+			MaxDeliver:        models.MsgSMaxRetries * 5,
+			InactiveThreshold: 24 * time.Hour,
 		},
 		{
-			Name:           models.MsgRecommendWrk,
-			FilterSubjects: []string{models.MsgRecommendSubj, fmt.Sprint(models.MsgRecommendSubj, ".>")},
-			AckPolicy:      jetstream.AckExplicitPolicy,
-			ReplayPolicy:   jetstream.ReplayInstantPolicy,
-			AckWait:        30 * time.Second,
-			MaxAckPending:  1000,
-			BackOff:        backOff[:],
+			Name:              models.MsgRecommendWrk,
+			FilterSubjects:    []string{models.MsgRecommendSubj, fmt.Sprint(models.MsgRecommendSubj, ".>")},
+			AckPolicy:         jetstream.AckExplicitPolicy,
+			ReplayPolicy:      jetstream.ReplayInstantPolicy,
+			AckWait:           30 * time.Second,
+			MaxAckPending:     1000,
+			MaxDeliver:        models.MsgSMaxRetries * 5,
+			InactiveThreshold: 24 * time.Hour,
 		},
 	}
 
@@ -156,11 +158,11 @@ func (r *JetStreamAdapter) initDLQConsumer(ctx context.Context) (jetstream.Consu
 
 	consumerCfg := jetstream.ConsumerConfig{
 		Name:              models.MsgDLQViewer,
-		FilterSubjects:    []string{fmt.Sprint(models.MsgProfileSubj, ".>"), fmt.Sprint(models.MsgRecommendSubj, ".>")},
+		FilterSubjects:    []string{fmt.Sprint(models.MsgDLQSubj, ">")},
 		DeliverPolicy:     jetstream.DeliverLastPolicy,
 		AckPolicy:         jetstream.AckExplicitPolicy,
 		ReplayPolicy:      jetstream.ReplayInstantPolicy,
-		InactiveThreshold: 60 * time.Minute, // Авто-удаление если не используется
+		InactiveThreshold: 24 * time.Hour, // Авто-удаление если не используется
 	}
 	if consumer, err = r.CreateOrUpdateConsumer(ctx, models.MsgStreamDLQ, consumerCfg); err != nil {
 		return nil, fmt.Errorf("failed to create consumer %s: %w", consumerCfg.Name, err)

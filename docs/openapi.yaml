@@ -14,7 +14,6 @@ security:
   - botAuth: []
 
 paths:
-
   # ─── Health ────────────────────────────────────────────────────────────────
 
   /api/v1/:
@@ -227,7 +226,8 @@ paths:
 
   /api/v1/admin/rules/{id}:
     get:
-      summary: Single rule
+      summary: Получение правила по id
+      tags: [Admin — Rules]
       security:
         - bearerAuth: []
       parameters:
@@ -251,7 +251,50 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerErr"
     put:
-      summary: Обновить правило
+      summary: Полное обновление правила
+      tags: [Admin — Rules]
+      security:
+        - adminAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRulePayload"
+      responses:
+        "200":
+          description: Правило обновлено
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalServerErr"
+    patch:
+      summary: Частичное обновление правила
       tags: [Admin — Rules]
       security:
         - adminAuth: []
@@ -312,7 +355,7 @@ paths:
           content:
             application/json:
               schema:
-                 $ref: "#/components/schemas/AdminRuleEnvelope"
+                $ref: "#/components/schemas/AdminRuleEnvelope"
 
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -598,7 +641,6 @@ paths:
                   value:
                     error: internal server error
 components:
-
   securitySchemes:
     botAuth:
       type: http
@@ -658,7 +700,6 @@ components:
             $ref: "#/components/schemas/Envelope"
 
   schemas:
-
     Envelope:
       type: object
       properties:
@@ -779,7 +820,17 @@ components:
 
     AdminRule:
       type: object
-      required: [id, name, astro_condition, product_tags, priority, is_active, created_at, updated_at]
+      required:
+        [
+          id,
+          name,
+          astro_condition,
+          product_tags,
+          priority,
+          is_active,
+          created_at,
+          updated_at,
+        ]
       properties:
         id:
           type: string
@@ -922,7 +973,7 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/AdminProduct"
-              
+
     AdminProductsListEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"

@@ -52,7 +52,7 @@ func TestRecommend_AsyncPublishesToNATS(t *testing.T) {
 		Return(nil).
 		Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -83,7 +83,7 @@ func TestRecommend_SyncCallsAIAndReturnsResult(t *testing.T) {
 	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("sample recommendation", nil).Times(1)
 	reqRepo.EXPECT().UpdateStatus(gomock.Any(), gomock.Any(), "completed", gomock.Any(), "").Return(nil).Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -111,7 +111,7 @@ func TestRecommend_SyncUserNotFound(t *testing.T) {
 	userRepo.EXPECT().Get(gomock.Any(), validUserID).Return(user.User{}, user.ErrNotFound).Times(1)
 	reqRepo.EXPECT().UpdateStatus(gomock.Any(), gomock.Any(), "failed", gomock.Any(), gomock.Any()).Return(nil).Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -134,7 +134,7 @@ func TestRecommend_SyncAIError(t *testing.T) {
 	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("", errors.New("boom")).Times(1)
 	reqRepo.EXPECT().UpdateStatus(gomock.Any(), gomock.Any(), "failed", gomock.Any(), gomock.Any()).Return(nil).Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -157,7 +157,7 @@ func TestRecommend_SyncReturns503WhenCircuitBreakerIsOpen(t *testing.T) {
 	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("", &resilience.ServiceUnavailableError{Service: "alisa_ai"}).Times(1)
 	reqRepo.EXPECT().UpdateStatus(gomock.Any(), gomock.Any(), "failed", gomock.Any(), gomock.Any()).Return(nil).Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -189,7 +189,7 @@ func TestRecommend_Validation(t *testing.T) {
 			pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
 			_ = context.Background()
 			// ни один зависимый мок не должен быть вызван
-			h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+			h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
 
 			body, _ := json.Marshal(tc.payload)
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
@@ -211,7 +211,7 @@ func TestRecommend_SyncTimeout(t *testing.T) {
 	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("", context.DeadlineExceeded).Times(1)
 	reqRepo.EXPECT().UpdateStatus(gomock.Any(), gomock.Any(), "failed", gomock.Any(), gomock.Any()).Return(nil).Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -229,7 +229,7 @@ func TestRecommend_SyncTimeout(t *testing.T) {
 func TestRecommend_InvalidJSON(t *testing.T) {
 	t.Parallel()
 	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader([]byte("invalid {")))
 	rr := httptest.NewRecorder()
@@ -243,7 +243,7 @@ func TestRecommend_DBCreateError(t *testing.T) {
 
 	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("db is down")).Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -263,7 +263,7 @@ func TestRecommend_AsyncPublishError(t *testing.T) {
 	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	pub.EXPECT().PublishMessage(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("nats down")).Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,

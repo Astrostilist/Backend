@@ -130,8 +130,8 @@ func (r *JetStreamRepository) streamToDomainStream(stream jetstream.Stream) *mod
 
 func (r *JetStreamRepository) domainToJetStreamConsumer(domain *models.Consumer) jetstream.ConsumerConfig {
 	return jetstream.ConsumerConfig{
-		Name: domain.Name,
-		//Durable:       domain.Durable, TODO
+		Name:          domain.Name,
+		Durable:       domain.Name,
 		AckPolicy:     jetstream.AckPolicy(domain.AckPolicy),
 		MaxDeliver:    domain.MaxDeliver,
 		ReplayPolicy:  jetstream.ReplayPolicy(domain.ReplayPolicy),

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"astroapi/internal/models"
@@ -56,6 +57,9 @@ func (req *ProfileRequest) Validate() map[string]string {
 	if _, err := time.Parse("2006-01-02", req.BirthDate); err != nil {
 		errs["birth_date"] = "must be in ISO 8601 format (YYYY-MM-DD)"
 	}
+	if strings.TrimSpace(req.BirthPlace) == "" {
+		errs["birth_place"] = "must not be empty"
+	}
 	return errs
 }
 
@@ -102,6 +106,9 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 
 	requestID := uuid.New().String()
 
+	// TODO:
+	// + begin transaction
+	// store user request
 	if err := h.requestsRepo.Create(r.Context(), requests.Request{
 		RequestID: requestID,
 		UserID:    req.UserID,
@@ -113,6 +120,7 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// store user (DB or cache)
 	err := h.uc.Execute(r.Context(), usecases.ProcessPersonalDataInput{
 		PersonalData: domain.PersonalData{
 			UserID:       req.UserID,
@@ -139,6 +147,9 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to publish event")
 		return
 	}
+
+	// TODO:
+	// - end transaction
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)

@@ -44,7 +44,11 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 		func(msg jetstream.Msg) {
 			msgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
-
+			c.sm.logger.Info("GOT MESSAGE")
+			meta, _ := msg.Metadata()
+			c.sm.logger.Info("Processing message",
+				zap.Uint64("stream_seq", meta.Sequence.Stream),
+				zap.Uint64("delivered", meta.NumDelivered))
 			if err := handler(msgCtx, msg); err != nil {
 				c.sm.logger.Error("Message handler failed",
 					zap.String("consumer", consumerName),
@@ -70,12 +74,13 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 					c.sm.logger.Info("Temporary error, allowing redelivery", zap.String("consumer", consumerName))
 					// длительность задержки игнорируется, т к приоритет у настроек стрима,
 					// но на всякий случай продублируем здесь
-					delayID := min(attempt, 3)
+					delayID := min(attempt-1, 3)
 					if nackErr := msg.NakWithDelay(backOff[delayID]); nackErr != nil {
+						//if nackErr := msg.Nak(); nackErr != nil {
 						c.sm.logger.Error("Failed to negative acknowledge message",
 							zap.String("error", nackErr.Error()))
 					} else {
-						c.sm.logger.Error("Message negative acknowledged",
+						c.sm.logger.Warn("Message negative acknowledged",
 							zap.String("consumer", consumerName),
 							zap.String("subject", msg.Subject()),
 							zap.Uint64("msg_id", id),
@@ -90,7 +95,7 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 					c.sm.logger.Error("Failed to acknowledge message",
 						zap.String("error", ackErr.Error()))
 				} else {
-					c.sm.logger.Debug("Message processed and acknowledged",
+					c.sm.logger.Info("Message processed and acknowledged",
 						zap.String("consumer", consumerName),
 						zap.String("subject", msg.Subject()))
 				}
