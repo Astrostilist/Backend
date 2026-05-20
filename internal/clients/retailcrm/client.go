@@ -66,7 +66,11 @@ func (c *RetailCRMClient) doRequest(ctx context.Context, method, endpoint string
 	if err != nil {
 		return nil, fmt.Errorf("network error during retailcrm request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			c.logger.Warn("failed to close response body", zap.Error(closeErr))
+		}
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
