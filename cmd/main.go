@@ -37,8 +37,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nats-io/nats.go/jetstream"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
@@ -84,6 +86,18 @@ func run() error {
 
 	defer func() {
 		if syncErr := zapLogger.Sync(); syncErr != nil {
+			log.Printf("failed to sync logger: %v", syncErr)
+		}
+	}()
+
+	// Переходим на глобальный логгер
+	globalLogger, err := logger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
+	if err != nil {
+		return err
+	}
+	logger.SetGlobalLogger(globalLogger)
+	defer func() {
+		if syncErr := globalLogger.Sync(); syncErr != nil {
 			log.Printf("failed to sync logger: %v", syncErr)
 		}
 	}()
@@ -219,33 +233,35 @@ func run() error {
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqReader, zapLogger)
 
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(astromidware.TraceMiddleware(cfg.JaegerServiceName))
-	r.Use(astromidware.ZapWithTrace(zapLogger))
-	r.Use(astromidware.RequestMetricsMiddleware())
-	r.Use(astromidware.RequestLogger(zapLogger))
-	r.Use(middleware.Recoverer)
-
-	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 
 	r.Group(func(r chi.Router) {
-		r.Use(handlers.ClientAuthMiddleware(cfg.BotAPIKey))
-		r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
-		r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
-		r.Post("/api/v1/feedback", feedbackHandler.CreateFeedback)
-		r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
-	})
+		r.Use(middleware.RequestID)
+		r.Use(astromidware.TracingMiddleware)
+		r.Use(astromidware.RequestLogger)
+		r.Use(astromidware.RequestMetricsMiddleware)
+		r.Use(middleware.Recoverer)
 
-	r.Post("/api/v1/auth/login", authHandler.Login)
-	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
+		r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 
-	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
-	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
-	handlers.RegisterAdminLogsRoutes(r, cfg.AdminToken, adminLogsHandler)
+		r.Group(func(r chi.Router) {
+			r.Use(handlers.ClientAuthMiddleware(cfg.BotAPIKey))
+			r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
+			r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
+			r.Post("/api/v1/feedback", feedbackHandler.CreateFeedback)
+			r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
+		})
 
-	r.Group(func(r chi.Router) {
-		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))
-		r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
+		r.Post("/api/v1/auth/login", authHandler.Login)
+		r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
+
+		handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
+		handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
+		handlers.RegisterAdminLogsRoutes(r, cfg.AdminToken, adminLogsHandler)
+
+		r.Group(func(r chi.Router) {
+			r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))
+			r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
+		})
 	})
 
 	r.Handle("/metrics", metrics.NewHandler())
@@ -370,6 +386,12 @@ func initTracer(ctx context.Context, cfg *config.Config) (*sdktrace.TracerProvid
 	)
 
 	otel.SetTracerProvider(tp)
+
+	otel.SetTextMapPropagator(
+		propagation.NewCompositeTextMapPropagator(
+			propagation.TraceContext{},
+		),
+	)
 
 	return tp, nil
 }

@@ -70,8 +70,4 @@ func (m *MonitorService) GetConsumerInfo(ctx context.Context, js *nats.JetStream
 		return
 	}
 	metrics.SetNatsConsumerLag(stream, consumer, float64(inf.NumPending))
-	m.logger.Debug("got consumer lag",
-		zap.String("stream", stream),
-		zap.String("consumer", consumer),
-		zap.Float64("lag", float64(inf.NumPending)))
 }

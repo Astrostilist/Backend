@@ -5,11 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"astroapi/internal/alisa"
+	astrologger "astroapi/internal/logger"
+	"astroapi/internal/models"
 	"astroapi/internal/requests"
 	"astroapi/internal/user"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
 )
 
@@ -203,11 +208,33 @@ func NewProfileProcessor(
 	return &ProfileProcessor{requestsRepo: requestsRepo, astroClient: astroClient, logger: logger}
 }
 
-func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
-	var msg profilePayload
-	if err := json.Unmarshal(payload, &msg); err != nil {
+func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
+	// 1. Парсим обёртку
+	var wrapped models.MessageWithTrace
+	if err := json.Unmarshal(message, &wrapped); err != nil {
 		return fmt.Errorf("validation: invalid profile payload: %w", err)
 	}
+
+	// 2. Восстанавливаем трейс
+	carrier := propagation.MapCarrier(wrapped.TraceContext)
+	wctx := otel.GetTextMapPropagator().Extract(ctx, carrier)
+
+	// 3. Создаём спан обработчика
+	tracer := otel.Tracer("worker-profile")
+	spanctx, span := tracer.Start(wctx, "worker.handle-profile")
+	defer span.End()
+
+	// 4. Таймаут
+	tctx, cancel := context.WithTimeout(spanctx, 30*time.Second)
+	defer cancel()
+
+	var msg profilePayload
+	if err := json.Unmarshal(wrapped.Payload, &msg); err != nil {
+		span.RecordError(err)
+		astrologger.Error(tctx, "invalid payload", zap.Error(err))
+		return err
+	}
+
 	if errs := msg.Profile.Validate(); len(errs) > 0 {
 		return fmt.Errorf("validation: %v", errs)
 	}
@@ -249,11 +276,11 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 	}
 
 	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
-		p.logger.Error("failed to mark profile request as completed", zap.Error(err))
+		astrologger.Error(ctx, "failed to mark profile request as completed", zap.Error(err))
 		return err
 	}
 
-	p.logger.Info("astro profile generated",
+	astrologger.Info(ctx, "astro profile generated",
 		zap.String("request_id", msg.RequestID),
 		zap.String("user_id", msg.Profile.UserID))
 	return nil
@@ -261,7 +288,7 @@ func (p *ProfileProcessor) Handle(ctx context.Context, payload []byte) error {
 
 func (p *ProfileProcessor) markFailed(ctx context.Context, requestID string, err error, worker string) {
 	if updateErr := p.requestsRepo.UpdateStatus(ctx, requestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
-		p.logger.Error("failed to mark request as failed", zap.String("worker", worker), zap.Error(updateErr))
+		astrologger.Error(ctx, "failed to mark request as failed", zap.String("worker", worker), zap.Error(updateErr))
 	}
 }
 

@@ -1,28 +1,23 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 
-	"github.com/riandyrn/otelchi"
-	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
-// TraceMiddleware — оборачивает handler в span
-func TraceMiddleware(serviceName string) func(http.Handler) http.Handler {
-	return otelchi.Middleware(serviceName)
-}
+func TracingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
 
-// ZapWithTrace — добавляет trace_id в logger из контекста
-func ZapWithTrace(logger *zap.Logger) func(next http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			traceID := trace.SpanFromContext(ctx).SpanContext().TraceID().String()
-			reqLogger := logger.With(zap.String("trace_id", traceID))
-			ctx = context.WithValue(ctx, "logger", reqLogger)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
+		// Создаем span
+		tracer := otel.Tracer("http-server")
+		ctx, span := tracer.Start(ctx, r.URL.Path)
+		defer span.End()
+
+		//logCtx := context.WithValue(ctx, "logger", logger.GetLoggerWithTrace(ctx))
+
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
