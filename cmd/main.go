@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -22,28 +23,23 @@ import (
 	infra "astroapi/internal/infrastructure"
 	health "astroapi/internal/infrastructure/health"
 	natsinfra "astroapi/internal/infrastructure/nats"
-	"astroapi/internal/logger"
 	"astroapi/internal/metrics"
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
 	"astroapi/internal/products"
-	feedbackrepo "astroapi/internal/repositories"
+	repositories "astroapi/internal/repositories"
 	"astroapi/internal/requests"
 	rules "astroapi/internal/ruleengine"
 	"astroapi/internal/usecases"
-	repositories "astroapi/internal/usecases/repositories"
 	"astroapi/internal/user"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
+	astrologger "astroapi/internal/infrastructure/logger"
+	tracer "astroapi/internal/infrastructure/tracer"
+
 	"go.uber.org/zap"
 )
 
@@ -71,17 +67,9 @@ func run() error {
 		return err
 	}
 
-	if cfg.AdminToken == "" {
-		log.Println("warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
-	}
-
-	if cfg.BotAPIKey == "" {
-		log.Println("warning: BOT_API_KEY is not set, client endpoints will reject all requests")
-	}
-
-	zapLogger, err := logger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
+	zapLogger, err := astrologger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init logger: %w", err)
 	}
 
 	defer func() {
@@ -91,16 +79,14 @@ func run() error {
 	}()
 
 	// Переходим на глобальный логгер
-	globalLogger, err := logger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
-	if err != nil {
-		return err
+	astrologger.SetGlobalLogger(zapLogger)
+
+	if cfg.AdminToken == "" {
+		astrologger.Warn(context.Background(), "config validation: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
 	}
-	logger.SetGlobalLogger(globalLogger)
-	defer func() {
-		if syncErr := globalLogger.Sync(); syncErr != nil {
-			log.Printf("failed to sync logger: %v", syncErr)
-		}
-	}()
+	if cfg.BotAPIKey == "" {
+		astrologger.Warn(context.Background(), "config validation: BOT_API_KEY is not set, client endpoints will reject all requests")
+	}
 
 	metrics.Initialize(cfg)
 	metricsReporter := metrics.CircuitBreakerReporter{}
@@ -108,42 +94,41 @@ func run() error {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 
-	tp, err := initTracer(rootCtx, cfg)
+	err = tracer.InitTracer(rootCtx, cfg)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("failed to init tracer: %w", err)
 	}
 
 	db, err := database.New(rootCtx, cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init db: %w", err)
 	}
 
 	defer func() {
 		if closeErr := db.Close(); closeErr != nil {
-			zapLogger.Error("failed to close database", zap.Error(closeErr))
+			astrologger.Error(context.Background(), "failed to close database", zap.Error(closeErr))
 		}
 	}()
 
 	natsConn, err := natsinfra.InitNATS(rootCtx, zapLogger, cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init nats: %w", err)
 	}
 
 	defer natsConn.DrainNATS()
 
 	js, err := jetstream.New(natsConn.Conn)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init nats jet stream: %w", err)
 	}
 
 	jsAdapter := natsinfra.NewJetStreamRepository(js, zapLogger)
 
 	initCtx, initCancel := context.WithTimeout(rootCtx, initTimeout)
+	defer initCancel()
 	if err := jsAdapter.InitializeStreams(initCtx); err != nil {
-		initCancel()
-		return err
+		return fmt.Errorf("failed to init streams: %w", err)
 	}
-	initCancel()
 
 	publisher := natsinfra.NewMessagePublisher(jsAdapter)
 
@@ -157,6 +142,12 @@ func run() error {
 	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
 	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
+
+	userRepositoryDelete := repositories.NewUserRepository(db.DB)
+	h := &handlers.Handler{
+		Repo:   userRepositoryDelete,
+		Logger: zapLogger,
+	}
 
 	healthRepo := health.NewHealthServiceRepo(db, natsConn)
 	monitor := infra.NewMonitorService(jsAdapter, healthRepo, zapLogger)
@@ -194,7 +185,7 @@ func run() error {
 				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
 			},
 		); consumeErr != nil {
-			zapLogger.Error("profile worker failed", zap.Error(consumeErr))
+			astrologger.Error(rootCtx, "profile worker failed", zap.Error(consumeErr))
 		}
 		<-rootCtx.Done()
 	})
@@ -208,7 +199,7 @@ func run() error {
 				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
 			},
 		); consumeErr != nil {
-			zapLogger.Error("recommend worker failed", zap.Error(consumeErr))
+			astrologger.Error(rootCtx, "recommend worker failed", zap.Error(consumeErr))
 		}
 
 		<-rootCtx.Done()
@@ -224,10 +215,10 @@ func run() error {
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, astroClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
-	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
+	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil, zapLogger)
 	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
 	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
-	feedbackHandler := handlers.NewFeedbackHandler(feedbackrepo.NewFeedbackRepository(db.DB))
+	feedbackHandler := handlers.NewFeedbackHandler(repositories.NewFeedbackRepository(db.DB))
 
 	dlqReader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqReader, zapLogger)
@@ -249,6 +240,7 @@ func run() error {
 			r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
 			r.Post("/api/v1/feedback", feedbackHandler.CreateFeedback)
 			r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
+			r.Delete("/api/v1/user/{user_id}", h.OblivionHandler)
 		})
 
 		r.Post("/api/v1/auth/login", authHandler.Login)
@@ -278,12 +270,10 @@ func run() error {
 	serverErr := make(chan error, 1)
 
 	go func() {
-		zapLogger.Info("app starting", zap.String("addr", srv.Addr))
-
+		astrologger.Info(rootCtx, "app starting", zap.String("addr", srv.Addr))
 		if listenErr := srv.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
 			serverErr <- listenErr
 		}
-
 		close(serverErr)
 	}()
 
@@ -292,7 +282,7 @@ func run() error {
 
 	select {
 	case <-quit:
-		zapLogger.Info("shutdown signal received")
+		astrologger.Info(rootCtx, "shutdown signal received")
 	case serverRunErr := <-serverErr:
 		if serverRunErr != nil {
 			return serverRunErr
@@ -303,19 +293,18 @@ func run() error {
 	defer cancelShutdown()
 
 	defer func() {
-		if err := tp.Shutdown(shutdownCtx); err != nil {
-			zapLogger.Error("error shutting down tracer provider: %v", zap.Error(err))
+		if err := tracer.Shutdown(shutdownCtx); err != nil {
+			astrologger.Error(shutdownCtx, "error shutting down tracer provider: %w", zap.Error(err))
 		}
 	}()
 
 	if shutdownErr := srv.Shutdown(shutdownCtx); shutdownErr != nil {
-		zapLogger.Error("server shutdown error", zap.Error(shutdownErr))
+		astrologger.Error(shutdownCtx, "server shutdown error", zap.Error(shutdownErr))
 	}
 
 	rootCancel()
 
 	done := make(chan struct{})
-
 	go func() {
 		wg.Wait()
 		close(done)
@@ -323,12 +312,11 @@ func run() error {
 
 	select {
 	case <-done:
-		zapLogger.Info("all workers stopped")
+		astrologger.Info(context.Background(), "all workers stopped")
 	case <-time.After(15 * time.Second):
-		zapLogger.Warn("timeout waiting workers shutdown")
+		astrologger.Warn(context.Background(), "timeout waiting workers shutdown")
 	}
-
-	zapLogger.Info("server exited")
+	astrologger.Info(context.Background(), "server exited")
 
 	return nil
 }
@@ -357,41 +345,4 @@ func decodeEncryptionKey(encoded string) ([]byte, error) {
 	}
 
 	return key, nil
-}
-
-func initTracer(ctx context.Context, cfg *config.Config) (*sdktrace.TracerProvider, error) {
-	println(cfg.JaegerOtelEndpoint)
-	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint("jaeger:4318"),
-		otlptracehttp.WithInsecure(),
-		otlptracehttp.WithTimeout(cfg.JaegerSendTimeout),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := resource.New(ctx,
-		resource.WithAttributes(
-			semconv.ServiceName(cfg.JaegerServiceName),
-		),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
-		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.JaegerSamplingRate))),
-	)
-
-	otel.SetTracerProvider(tp)
-
-	otel.SetTextMapPropagator(
-		propagation.NewCompositeTextMapPropagator(
-			propagation.TraceContext{},
-		),
-	)
-
-	return tp, nil
 }

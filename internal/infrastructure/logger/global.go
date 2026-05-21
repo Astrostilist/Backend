@@ -9,6 +9,11 @@ import (
 
 var globalLogger *zap.Logger
 
+func init() {
+	// По умолчанию — нулевой логгер
+	globalLogger = zap.NewNop()
+}
+
 func SetGlobalLogger(logger *zap.Logger) {
 	globalLogger = logger
 }

@@ -10,6 +10,7 @@ import (
 	almocks "astroapi/internal/alisa/mocks"
 	"astroapi/internal/handlers"
 	handlermocks "astroapi/internal/handlers/mocks"
+	"astroapi/internal/models"
 	"astroapi/internal/requests"
 	reqmocks "astroapi/internal/requests/mocks"
 	rulemocks "astroapi/internal/ruleengine/mocks"
@@ -43,7 +44,7 @@ func TestProfileProcessor_HappyPath(t *testing.T) {
 
 	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, zap.NewNop())
 
-	payload, _ := json.Marshal(map[string]any{
+	payload := wrapWithTrace(map[string]any{
 		"request_id": "req-1",
 		"profile": map[string]any{
 			"user_id":       validUserID,
@@ -66,7 +67,7 @@ func TestProfileProcessor_ValidationError(t *testing.T) {
 
 	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, zap.NewNop())
 
-	payload, _ := json.Marshal(map[string]any{
+	payload := wrapWithTrace(map[string]any{
 		"request_id": "req-1",
 		"profile": map[string]any{
 			"user_id":    "not-uuid",
@@ -100,7 +101,7 @@ func TestProfileProcessor_AstroAPIFailureMarksRequestFailed(t *testing.T) {
 		Return(nil).Times(1)
 
 	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, zap.NewNop())
-	payload, _ := json.Marshal(map[string]any{
+	payload := wrapWithTrace(map[string]any{
 		"request_id": "req-1",
 		"profile": map[string]any{
 			"user_id":       validUserID,
@@ -110,7 +111,18 @@ func TestProfileProcessor_AstroAPIFailureMarksRequestFailed(t *testing.T) {
 		},
 	})
 	err := p.Handle(context.Background(), payload)
-	require.ErrorIs(t, err, astroErr)
+	var targetErr error = astroErr
+	require.ErrorAs(t, err, &targetErr)
+}
+
+func wrapWithTrace(payload interface{}) []byte {
+	inner, _ := json.Marshal(payload)
+	msg := models.MessageWithTrace{
+		TraceContext: make(map[string]string),
+		Payload:      inner,
+	}
+	result, _ := json.Marshal(msg)
+	return result
 }
 
 func TestRecommendProcessor_HappyPath(t *testing.T) {
@@ -138,7 +150,7 @@ func TestRecommendProcessor_HappyPath(t *testing.T) {
 
 	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, zap.NewNop())
 
-	payload, _ := json.Marshal(map[string]any{
+	payload := wrapWithTrace(map[string]any{
 		"request_id": "req-2",
 		"recommend": map[string]any{
 			"user_id":  validUserID,
@@ -162,7 +174,7 @@ func TestRecommendProcessor_DuplicateCompletedIsSkipped(t *testing.T) {
 		Return(requests.Request{RequestID: "req-dup", Status: requests.StatusCompleted}, nil).Times(1)
 
 	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, zap.NewNop())
-	payload, _ := json.Marshal(map[string]any{
+	payload := wrapWithTrace(map[string]any{
 		"request_id": "req-dup",
 		"recommend": map[string]any{
 			"user_id":  validUserID,
@@ -186,7 +198,7 @@ func TestRecommendProcessor_ProcessingRequestIsNotCompleted(t *testing.T) {
 		Return(requests.Request{RequestID: "req-processing", Status: requests.StatusProcessing}, nil).Times(1)
 
 	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, zap.NewNop())
-	payload, _ := json.Marshal(map[string]any{
+	payload := wrapWithTrace(map[string]any{
 		"request_id": "req-processing",
 		"recommend": map[string]any{
 			"user_id":  validUserID,

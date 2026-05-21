@@ -1,12 +1,12 @@
 package handlers
 
 import (
-	astrologger "astroapi/internal/logger"
+	astrologger "astroapi/internal/infrastructure/logger"
 	"astroapi/internal/models"
+	"astroapi/internal/repositories/domain"
 	"astroapi/internal/requests"
 	"astroapi/internal/resilience"
 	"astroapi/internal/usecases"
-	"astroapi/internal/usecases/repositories/domain"
 	"encoding/json"
 	"errors"
 	"io"
@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -86,9 +87,12 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rctx := r.Context()
+	requestID := uuid.New().String()
+
 	// Span для бизнес-логики хэндлера
 	tracer := otel.Tracer("http-api")
-	hctx, handlerSpan := tracer.Start(rctx, "handler.create-profile")
+	hctx, handlerSpan := tracer.Start(rctx, "handler.profile")
+	handlerSpan.SetAttributes(attribute.String("request_id", requestID))
 	defer handlerSpan.End()
 
 	r.Body = http.MaxBytesReader(w, r.Body, profileMaxBodyBytes)
@@ -114,8 +118,6 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		handlerSpan.RecordError(errors.New("validation error"))
 		return
 	}
-
-	requestID := uuid.New().String()
 
 	// TODO:
 	// + begin transaction

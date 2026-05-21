@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,6 +44,7 @@ func RegisterAdminRulesRoutes(router chi.Router, adminToken string, handler *Adm
 		router.Post("/", handler.CreateRule)
 		router.Get("/{id}", handler.GetRule)
 		router.Put("/{id}", handler.UpdateRule)
+		router.Patch("/{id}", handler.PatchRule)
 		router.Delete("/{id}", handler.DeleteRule)
 	})
 }
@@ -148,6 +150,81 @@ func (h *AdminRulesHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// PatchRule - частичное обновление.
+func (h *AdminRulesHandler) PatchRule(w http.ResponseWriter, r *http.Request) {
+	ruleID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if ruleID == "" {
+		writeError(w, http.StatusBadRequest, "rule id is required")
+		return
+	}
+	// получить данные,если запись уже есть в БД
+	rule, err := h.repository.Get(r.Context(), ruleID)
+	if err != nil {
+		switch {
+		case errors.Is(err, rules.ErrRuleNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	payload, err := decodeAdminRuleRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// копирование, т.к. rule *rules.Rule
+	var copiedRule adminRuleRequest
+	copiedRule.Name = rule.Name
+	copiedRule.AstroCondition = maps.Clone(rule.AstroCondition)
+	copy(copiedRule.ProductTags, rule.ProductTags)
+	copiedRule.Priority = &rule.Priority
+	copiedRule.IsActive = &rule.IsActive
+
+	// выполним проверки введенных данных
+	// если значения равны nil => пользователь не указал данные
+	if payload.Name != "" {
+		copiedRule.Name = payload.Name
+	}
+	if payload.AstroCondition != nil {
+		copiedRule.AstroCondition = maps.Clone(payload.AstroCondition)
+	}
+	if len(payload.ProductTags) > 0 {
+		copy(copiedRule.ProductTags, payload.ProductTags)
+	}
+	if payload.Priority != nil {
+		copiedRule.Priority = payload.Priority
+	}
+	if payload.IsActive != nil {
+		copiedRule.IsActive = payload.IsActive
+	}
+	// валидация
+	input, err := copiedRule.toRuleInput()
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	// воспользуемся матодом Update
+	updatedRule, err := h.repository.Update(r.Context(), ruleID, &input)
+
+	if err != nil {
+		if errors.Is(err, rules.ErrRuleNotFound) {
+			writeError(w, http.StatusNotFound, "astro rule not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update astro rule")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, Response{
+		Message: "Astro rule updated successfully",
+		Data:    map[string]any{"id": updatedRule.String()},
+	})
+}
+
 func (h *AdminRulesHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	ruleID := strings.TrimSpace(chi.URLParam(r, "id"))
 	if ruleID == "" {
@@ -233,22 +310,22 @@ func (r adminRuleRequest) toRuleInput() (rules.RuleInput, error) {
 func parseRulesListOptions(r *http.Request) (rules.ListOptions, error) {
 	query := r.URL.Query()
 
-	limit := defaultRulesLimit
+	pageSize := defaultRulesLimit
 	if rawLimit := strings.TrimSpace(query.Get("page_size")); rawLimit != "" {
 		parsedLimit, err := strconv.Atoi(rawLimit)
 		if err != nil || parsedLimit < 1 || parsedLimit > maxRulesLimit {
 			return rules.ListOptions{}, errors.New("page_size (limit) must be an integer between 1 and 200")
 		}
-		limit = parsedLimit
+		pageSize = parsedLimit
 	}
 
-	offset := 1
+	page := 1
 	if rawOffset := strings.TrimSpace(query.Get("page")); rawOffset != "" {
 		parsedOffset, err := strconv.Atoi(rawOffset)
 		if err != nil || parsedOffset < 0 {
 			return rules.ListOptions{}, errors.New("page (offset) must be an integer greater than or equal to 0")
 		}
-		offset = parsedOffset
+		page = parsedOffset
 	}
 
 	var isActiveFilter *bool
@@ -265,8 +342,8 @@ func parseRulesListOptions(r *http.Request) (rules.ListOptions, error) {
 
 	return rules.ListOptions{
 		IsActive: isActiveFilter,
-		Limit:    limit,
-		Offset:   offset,
+		PageSize: pageSize,
+		Page:     page,
 	}, nil
 }
 

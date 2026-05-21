@@ -3,7 +3,7 @@
 package ruleengine
 
 import (
-	"astroapi/internal/logger"
+	"astroapi/internal/infrastructure/logger"
 	"context"
 	"database/sql"
 	"log"
@@ -360,8 +360,8 @@ func TestList(t *testing.T) {
 			},
 			opt: ListOptions{
 				IsActive: func(b bool) *bool { return &b }(true),
-				Limit:    2,
-				Offset:   2,
+				PageSize: 10,
+				Page:     1,
 			},
 			wantList: []RuleInput{
 				{

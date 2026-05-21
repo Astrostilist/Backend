@@ -16,8 +16,6 @@ func TracingMiddleware(next http.Handler) http.Handler {
 		ctx, span := tracer.Start(ctx, r.URL.Path)
 		defer span.End()
 
-		//logCtx := context.WithValue(ctx, "logger", logger.GetLoggerWithTrace(ctx))
-
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

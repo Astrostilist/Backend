@@ -1,7 +1,7 @@
 package nats
 
 import (
-	astrologger "astroapi/internal/logger"
+	astrologger "astroapi/internal/infrastructure/logger"
 	"astroapi/internal/models"
 	"context"
 	"encoding/json"

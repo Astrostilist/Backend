@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	astrologger "astroapi/internal/logger"
+	astrologger "astroapi/internal/infrastructure/logger"
 	"net/http"
 	"time"
 
