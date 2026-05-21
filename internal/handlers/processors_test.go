@@ -111,7 +111,7 @@ func TestProfileProcessor_AstroAPIFailureMarksRequestFailed(t *testing.T) {
 		},
 	})
 	err := p.Handle(context.Background(), payload)
-	var targetErr error = astroErr
+	var targetErr = astroErr
 	require.ErrorAs(t, err, &targetErr)
 }
 
