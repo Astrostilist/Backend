@@ -28,26 +28,35 @@ func (t *userRepo) DeleteUsers(ctx context.Context, userID string) (bool, error)
 	if err != nil {
 		return false, err
 	}
-	query := []string{queryDeleteFromUserConsents, queryDeleteFromGenerationResults, queryDeleteFromFeedback}
-	for _, i := range query {
-		if _, err := tx.ExecContext(ctx, i, userID); err != nil {
+
+	deleteQueries := []string{queryDeleteFromUserConsents, queryDeleteFromGenerationResults, queryDeleteFromFeedback}
+	for _, query := range deleteQueries {
+		if _, err := tx.ExecContext(ctx, query, userID); err != nil {
 			_ = tx.Rollback()
 			return false, err
 		}
 	}
-	req, err := tx.ExecContext(ctx, queryDeleteFromUsers, userID)
+
+	res, err := tx.ExecContext(ctx, queryDeleteFromUsers, userID)
 	if err != nil {
 		_ = tx.Rollback()
 		return false, err
 	}
-	rows, err := req.RowsAffected()
+
+	rows, err := res.RowsAffected()
 	if err != nil {
 		_ = tx.Rollback()
 		return false, err
 	}
-	// проверка было ли что-то удалено
 	if rows == 0 {
+		if err := tx.Rollback(); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
-	return true, tx.Commit()
+
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
