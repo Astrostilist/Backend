@@ -16,10 +16,11 @@ func setupUserRepoMock(t *testing.T) (sqlmock.Sqlmock, UserRepository, func()) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 
-	cleanup := func() {
-		require.NoError(t, mock.ExpectationsWereMet())
-		require.NoError(t, db.Close())
-	}
+    cleanup := func() {
+	    mock.ExpectClose()
+	    require.NoError(t, db.Close())
+	    require.NoError(t, mock.ExpectationsWereMet())
+    }
 
 	return mock, NewUserRepository(db), cleanup
 }
