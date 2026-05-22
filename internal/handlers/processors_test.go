@@ -22,8 +22,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const validUserID = "123e4567-e89b-12d3-a456-426614174000"
-
 func TestProfileProcessor_HappyPath(t *testing.T) {
 	t.Parallel()
 	ctrl := gomock.NewController(t)
