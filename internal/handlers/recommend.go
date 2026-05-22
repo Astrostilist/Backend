@@ -52,13 +52,13 @@ func (req *RecommendRequest) Validate() map[string]string {
 
 // RecommendHandler обслуживает POST /api/v1/astro/recommend.
 type RecommendHandler struct {
-	publisher    MsgPublisher
-	userRepo     user.Repository
-	rulesRepo    RuleMatcher
-	aiClient     alisa.Generator
-	astroClient  AstroProfileGetter
-	requestsRepo requests.Repository
-	logger       *zap.Logger
+	publisher     MsgPublisher
+	userRepo      user.Repository
+	rulesRepo     RuleMatcher
+	aiClient      alisa.Generator
+	astroProvider AstroProvider
+	requestsRepo  requests.Repository
+	logger        *zap.Logger
 }
 
 func NewRecommendHandler(
@@ -66,18 +66,18 @@ func NewRecommendHandler(
 	userRepo user.Repository,
 	rulesRepo RuleMatcher,
 	aiClient alisa.Generator,
-	astroClient AstroProfileGetter,
+	astroProvider AstroProvider,
 	requestsRepo requests.Repository,
 	logger *zap.Logger,
 ) *RecommendHandler {
 	return &RecommendHandler{
-		publisher:    publisher,
-		userRepo:     userRepo,
-		rulesRepo:    rulesRepo,
-		aiClient:     aiClient,
-		astroClient:  astroClient,
-		requestsRepo: requestsRepo,
-		logger:       logger,
+		publisher:     publisher,
+		userRepo:      userRepo,
+		rulesRepo:     rulesRepo,
+		aiClient:      aiClient,
+		astroProvider: astroProvider,
+		requestsRepo:  requestsRepo,
+		logger:        logger,
 	}
 }
 

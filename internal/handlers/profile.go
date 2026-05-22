@@ -11,7 +11,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,11 +25,14 @@ const (
 )
 
 type ProfileRequest struct {
-	UserID       string `json:"user_id"`
-	BirthDate    string `json:"birth_date"`
-	BirthTime    string `json:"birth_time,omitempty"`
-	BirthPlace   string `json:"birth_place"`
-	ConsentGiven bool   `json:"consent_given"`
+	UserID       string   `json:"user_id"`
+	BirthDate    string   `json:"birth_date"`
+	BirthTime    string   `json:"birth_time,omitempty"`
+	BirthPlace   string   `json:"birth_place,omitempty"`
+	Lat          *float64 `json:"lat"`
+	Lon          *float64 `json:"lon"`
+	Timezone     string   `json:"timezone,omitempty"`
+	ConsentGiven bool     `json:"consent_given"`
 }
 
 // ProfileHandler обрабатывает POST /api/v1/astro/profile.
@@ -59,8 +61,11 @@ func (req *ProfileRequest) Validate() map[string]string {
 	if _, err := time.Parse("2006-01-02", req.BirthDate); err != nil {
 		errs["birth_date"] = "must be in ISO 8601 format (YYYY-MM-DD)"
 	}
-	if strings.TrimSpace(req.BirthPlace) == "" {
-		errs["birth_place"] = "must not be empty"
+	if req.Lat == nil {
+		errs["lat"] = "is required for natal chart calculation"
+	}
+	if req.Lon == nil {
+		errs["lon"] = "is required for natal chart calculation"
 	}
 	return errs
 }
