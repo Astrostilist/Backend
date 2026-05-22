@@ -93,3 +93,14 @@ func loadPromptTemplates(logger *zap.Logger) *template.Template {
 
 	return promptTemplates
 }
+
+func templateNameByScenario(scenario string) string {
+	switch scenario {
+	case scenarioPersonalStyle:
+		return "personal_style.tmpl"
+	case scenarioPerfectGift:
+		return "perfect_gift.tmpl"
+	default:
+		return ""
+	}
+}
