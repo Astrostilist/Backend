@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"go.opentelemetry.io/otel"
 )
 
 // PostgresRepository — реализация Repository поверх PostgreSQL.
@@ -21,13 +23,18 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 // Create создает новую запись запроса в requests_log.
 // На вход принимает контекст и данные запроса, на выход возвращает ошибку записи.
 func (r *PostgresRepository) Create(ctx context.Context, req Request) error {
+	tracer := otel.Tracer("db-repo")
+	repoctx, repoSpan := tracer.Start(ctx, "request.Create")
+	defer repoSpan.End()
+
 	const query = `
 		INSERT INTO requests_log (request_id, user_id, scenario, status, attempt_count)
 		VALUES ($1, $2, $3, $4, $5)
 	`
-	if _, err := r.db.ExecContext(ctx, query,
+	if _, err := r.db.ExecContext(repoctx, query,
 		req.RequestID, req.UserID, req.Scenario, req.Status, req.AttemptCount,
 	); err != nil {
+		repoSpan.RecordError(err)
 		return fmt.Errorf("insert requests_log: %w", err)
 	}
 	return nil
@@ -36,6 +43,10 @@ func (r *PostgresRepository) Create(ctx context.Context, req Request) error {
 // StartProcessing атомарно переводит запрос из pending в processing.
 // На вход принимает контекст и request_id, на выход возвращает флаг успешного старта и ошибку.
 func (r *PostgresRepository) StartProcessing(ctx context.Context, requestID string) (bool, error) {
+	tracer := otel.Tracer("db-repo")
+	repoctx, repoSpan := tracer.Start(ctx, "request.StartProcessing")
+	defer repoSpan.End()
+
 	const query = `
 		UPDATE requests_log
 		SET status     = $2,
@@ -43,12 +54,14 @@ func (r *PostgresRepository) StartProcessing(ctx context.Context, requestID stri
 		    completed_at = NULL
 		WHERE request_id = $1 AND status = $3
 	`
-	res, err := r.db.ExecContext(ctx, query, requestID, StatusProcessing, StatusPending)
+	res, err := r.db.ExecContext(repoctx, query, requestID, StatusProcessing, StatusPending)
 	if err != nil {
+		repoSpan.RecordError(err)
 		return false, fmt.Errorf("start processing requests_log: %w", err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
+		repoSpan.RecordError(err)
 		return false, fmt.Errorf("rows affected: %w", err)
 	}
 	return rows > 0, nil
@@ -57,6 +70,10 @@ func (r *PostgresRepository) StartProcessing(ctx context.Context, requestID stri
 // UpdateStatus обновляет статус, результат и ошибку запроса в requests_log.
 // На вход принимает контекст, request_id, новый статус, JSON-результат и текст ошибки; на выход возвращает ошибку обновления.
 func (r *PostgresRepository) UpdateStatus(ctx context.Context, requestID, status string, result []byte, errReason string) error {
+	tracer := otel.Tracer("db-repo")
+	repoctx, repoSpan := tracer.Start(ctx, "request.UpdateStatus")
+	defer repoSpan.End()
+
 	var resultArg any
 	if len(result) > 0 {
 		resultArg = string(result)
@@ -75,12 +92,14 @@ func (r *PostgresRepository) UpdateStatus(ctx context.Context, requestID, status
 			END
 		WHERE request_id = $1
 	`
-	res, err := r.db.ExecContext(ctx, query, requestID, status, resultArg, errReason)
+	res, err := r.db.ExecContext(repoctx, query, requestID, status, resultArg, errReason)
 	if err != nil {
+		repoSpan.RecordError(err)
 		return fmt.Errorf("update requests_log: %w", err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
+		repoSpan.RecordError(err)
 		return fmt.Errorf("rows affected requests_log: %w", err)
 	}
 	if rows == 0 {
@@ -92,13 +111,17 @@ func (r *PostgresRepository) UpdateStatus(ctx context.Context, requestID, status
 // Get возвращает состояние запроса из requests_log по request_id.
 // На вход принимает контекст и request_id, на выход возвращает данные запроса или ошибку.
 func (r *PostgresRepository) Get(ctx context.Context, requestID string) (Request, error) {
+	tracer := otel.Tracer("db-repo")
+	repoctx, repoSpan := tracer.Start(ctx, "request.Get")
+	defer repoSpan.End()
+
 	const query = `
 		SELECT request_id, user_id, scenario, status, attempt_count,
 		       COALESCE(error_reason, ''), COALESCE(result_payload::text, '')
 		FROM requests_log
-		WHERE request_id = $1
+		WHERE request_id = $1::uuid
 	`
-	row := r.db.QueryRowContext(ctx, query, requestID)
+	row := r.db.QueryRowContext(repoctx, query, requestID)
 
 	var (
 		req        Request
@@ -106,6 +129,7 @@ func (r *PostgresRepository) Get(ctx context.Context, requestID string) (Request
 	)
 	if err := row.Scan(&req.RequestID, &req.UserID, &req.Scenario, &req.Status,
 		&req.AttemptCount, &req.ErrorReason, &resultText); err != nil {
+		repoSpan.RecordError(err)
 		if errors.Is(err, sql.ErrNoRows) {
 			return Request{}, ErrNotFound
 		}

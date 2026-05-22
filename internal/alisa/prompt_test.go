@@ -1,7 +1,7 @@
 package alisa
 
 import (
-	"astroapi/internal/logger"
+	"astroapi/internal/infrastructure/logger"
 	"testing"
 
 	"github.com/stretchr/testify/require"

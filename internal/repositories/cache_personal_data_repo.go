@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
+	"go.opentelemetry.io/otel"
 )
 
 type CacheRepo struct {
@@ -24,13 +25,22 @@ func NewCacheRepo(ttl time.Duration, servers []string) *CacheRepo {
 }
 
 func (r *CacheRepo) Save(ctx context.Context, data domain.PersonalData) error {
+	tracer := otel.Tracer("cache-repo")
+	repoctx, repoSpan := tracer.Start(ctx, "user-profile.Save")
+	_ = repoctx
+	defer repoSpan.End()
+
 	if data.UserID == "" {
-		return errors.New("UserID cannot be empty")
+		err := errors.New("UserID cannot be empty")
+		repoSpan.RecordError(err)
+		return err
 	}
 	key := fmt.Sprintf("personal_data:%s", data.UserID)
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		return fmt.Errorf("personal data serialization error: %w", err)
+		err := fmt.Errorf("personal data serialization error: %w", err)
+		repoSpan.RecordError(err)
+		return err
 	}
 	// Создаём запись в Memcached
 	item := &memcache.Item{
@@ -40,7 +50,9 @@ func (r *CacheRepo) Save(ctx context.Context, data domain.PersonalData) error {
 	}
 
 	if err := r.client.Set(item); err != nil {
-		return fmt.Errorf("memcached save error: %w", err)
+		err := fmt.Errorf("memcached save error: %w", err)
+		repoSpan.RecordError(err)
+		return err
 	}
 
 	return nil
