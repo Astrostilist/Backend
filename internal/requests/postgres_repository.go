@@ -67,7 +67,7 @@ func (r *PostgresRepository) StartProcessing(ctx context.Context, requestID stri
 			OR (status = $7 AND attempt_count < $8)
 		  )
 	`
-	res, err := r.db.ExecContext(ctx, query,
+	res, err := r.db.ExecContext(repoctx, query,
 		requestID,
 		StatusProcessing,
 		StatusPending,
