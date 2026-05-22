@@ -148,6 +148,28 @@ func stringFromContext(ctx map[string]any, key string) (string, bool) {
 	return value, value != ""
 }
 
+func workerPayload(message []byte) (json.RawMessage, map[string]string, error) {
+	var wrapped models.MessageWithTrace
+	if err := json.Unmarshal(message, &wrapped); err != nil {
+		return nil, nil, err
+	}
+
+	if len(wrapped.Payload) == 0 {
+		return json.RawMessage(message), nil, nil
+	}
+
+	return wrapped.Payload, wrapped.TraceContext, nil
+}
+
+func traceContextFromMessage(ctx context.Context, traceContext map[string]string) context.Context {
+	if len(traceContext) == 0 {
+		return ctx
+	}
+
+	carrier := propagation.MapCarrier(traceContext)
+	return otel.GetTextMapPropagator().Extract(ctx, carrier)
+}
+
 func beginRequestProcessing(
 	ctx context.Context,
 	repo requests.Repository,
@@ -212,13 +234,12 @@ func NewProfileProcessor(
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
-	var wrapped models.MessageWithTrace
-	if err := json.Unmarshal(message, &wrapped); err != nil {
+	payload, traceContext, err := workerPayload(message)
+	if err != nil {
 		return fmt.Errorf("validation: invalid profile payload: %w", err)
 	}
 
-	carrier := propagation.MapCarrier(wrapped.TraceContext)
-	wctx := otel.GetTextMapPropagator().Extract(ctx, carrier)
+	wctx := traceContextFromMessage(ctx, traceContext)
 
 	tracer := otel.Tracer("worker-profile")
 	spanctx, span := tracer.Start(wctx, "worker.handle-profile")
@@ -228,10 +249,10 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 	defer cancel()
 
 	var msg profilePayload
-	if err := json.Unmarshal(wrapped.Payload, &msg); err != nil {
+	if err := json.Unmarshal(payload, &msg); err != nil {
 		span.RecordError(err)
 		astrologger.Error(tctx, "invalid payload", zap.Error(err))
-		return err
+		return fmt.Errorf("validation: invalid profile payload: %w", err)
 	}
 
 	if errs := msg.Profile.Validate(); len(errs) > 0 {
@@ -373,13 +394,12 @@ func (p *RecommendProcessor) nextFailureStatus(ctx context.Context, requestID st
 }
 
 func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
-	var wrapped models.MessageWithTrace
-	if err := json.Unmarshal(message, &wrapped); err != nil {
+	payload, traceContext, err := workerPayload(message)
+	if err != nil {
 		return fmt.Errorf("validation: invalid recommend payload: %w", err)
 	}
 
-	carrier := propagation.MapCarrier(wrapped.TraceContext)
-	wctx := otel.GetTextMapPropagator().Extract(ctx, carrier)
+	wctx := traceContextFromMessage(ctx, traceContext)
 
 	tracer := otel.Tracer("worker-recommend")
 	spanctx, span := tracer.Start(wctx, "worker.handle-recommend")
@@ -389,7 +409,7 @@ func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
 	defer cancel()
 
 	var msg recommendPayload
-	if err := json.Unmarshal(wrapped.Payload, &msg); err != nil {
+	if err := json.Unmarshal(payload, &msg); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("validation: invalid recommend payload: %w", err)
 	}
