@@ -13,6 +13,7 @@ const maxErrorMessageLength = 500
 var allowedStatuses = map[string]struct{}{
 	requests.StatusPending:    {},
 	requests.StatusProcessing: {},
+	requests.StatusRetry:      {},
 	requests.StatusCompleted:  {},
 	requests.StatusFailed:     {},
 }

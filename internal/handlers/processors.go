@@ -148,6 +148,28 @@ func stringFromContext(ctx map[string]any, key string) (string, bool) {
 	return value, value != ""
 }
 
+func workerPayload(message []byte) (json.RawMessage, map[string]string, error) {
+	var wrapped models.MessageWithTrace
+	if err := json.Unmarshal(message, &wrapped); err != nil {
+		return nil, nil, err
+	}
+
+	if len(wrapped.Payload) == 0 {
+		return json.RawMessage(message), nil, nil
+	}
+
+	return wrapped.Payload, wrapped.TraceContext, nil
+}
+
+func traceContextFromMessage(ctx context.Context, traceContext map[string]string) context.Context {
+	if len(traceContext) == 0 {
+		return ctx
+	}
+
+	carrier := propagation.MapCarrier(traceContext)
+	return otel.GetTextMapPropagator().Extract(ctx, carrier)
+}
+
 func beginRequestProcessing(
 	ctx context.Context,
 	repo requests.Repository,
@@ -156,37 +178,40 @@ func beginRequestProcessing(
 ) (bool, error) {
 	req, err := repo.Get(ctx, requestID)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("get request before processing: %w", err)
 	}
-	if req.Status == requests.StatusCompleted {
+	if len(req.Result) > 0 {
 		logger.Info("skipping duplicate request_id", zap.String("request_id", requestID))
 		return false, nil
 	}
-	if req.Status != requests.StatusPending {
-		logger.Info("request is not pending, skip processing",
-			zap.String("request_id", requestID), zap.String("status", req.Status))
+	if req.Status == requests.StatusFailed && req.AttemptCount >= requests.MaxProcessingAttempts {
+		logger.Info("request already exhausted attempts, skip processing",
+			zap.String("request_id", requestID),
+			zap.Int("attempt_count", req.AttemptCount))
 		return false, nil
 	}
 
 	started, err := repo.StartProcessing(ctx, requestID)
 	if err != nil {
-		// TODO:
-		// разобраться с процессом. Обработчик должен либо обрабатывать запрос до состояния completed,
-		// либо возвращать ошибку. Иначе у нас и запрос не обработан и сообщение из очереди удалено
-		return false, fmt.Errorf("request is not pending, skip processing")
+		return false, fmt.Errorf("start request processing: %w", err)
 	}
 	if !started {
 		current, getErr := repo.Get(ctx, requestID)
 		if getErr != nil {
-			return false, getErr
+			return false, fmt.Errorf("get request after start conflict: %w", getErr)
 		}
-		if current.Status == requests.StatusCompleted {
+		if len(current.Result) > 0 {
 			logger.Info("skipping duplicate request_id", zap.String("request_id", requestID))
 			return false, nil
 		}
-		logger.Info("request was locked by another worker",
-			zap.String("request_id", requestID), zap.String("status", current.Status))
-		return false, nil
+		if current.Status == requests.StatusFailed && current.AttemptCount >= requests.MaxProcessingAttempts {
+			logger.Info("request already exhausted attempts, skip processing",
+				zap.String("request_id", requestID),
+				zap.Int("attempt_count", current.AttemptCount))
+			return false, nil
+		}
+		return false, fmt.Errorf("request %s has no result_payload and cannot start processing: status=%s attempt_count=%d",
+			requestID, current.Status, current.AttemptCount)
 	}
 	return true, nil
 }
@@ -209,39 +234,36 @@ func NewProfileProcessor(
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
-	// 1. Парсим обёртку
-	var wrapped models.MessageWithTrace
-	if err := json.Unmarshal(message, &wrapped); err != nil {
+	payload, traceContext, err := workerPayload(message)
+	if err != nil {
 		return fmt.Errorf("validation: invalid profile payload: %w", err)
 	}
 
-	// 2. Восстанавливаем трейс
-	carrier := propagation.MapCarrier(wrapped.TraceContext)
-	wctx := otel.GetTextMapPropagator().Extract(ctx, carrier)
+	wctx := traceContextFromMessage(ctx, traceContext)
 
-	// 3. Создаём спан обработчика
 	tracer := otel.Tracer("worker-profile")
 	spanctx, span := tracer.Start(wctx, "worker.handle-profile")
 	defer span.End()
 
-	// 4. Таймаут
 	tctx, cancel := context.WithTimeout(spanctx, 30*time.Second)
 	defer cancel()
 
 	var msg profilePayload
-	if err := json.Unmarshal(wrapped.Payload, &msg); err != nil {
+	if err := json.Unmarshal(payload, &msg); err != nil {
 		span.RecordError(err)
 		astrologger.Error(tctx, "invalid payload", zap.Error(err))
-		return err
+		return fmt.Errorf("validation: invalid profile payload: %w", err)
 	}
 
 	if errs := msg.Profile.Validate(); len(errs) > 0 {
-		span.RecordError(errors.New("validation error"))
-		return fmt.Errorf("validation: %v", errs)
+		err := fmt.Errorf("validation: %v", errs)
+		span.RecordError(err)
+		return err
 	}
 
 	shouldProcess, err := beginRequestProcessing(tctx, p.requestsRepo, p.logger, msg.RequestID)
 	if err != nil {
+		span.RecordError(err)
 		return err
 	}
 	if !shouldProcess {
@@ -250,16 +272,18 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 
 	if p.astroClient == nil {
 		err := errors.New("astro profile client is not configured")
-		p.markFailed(tctx, msg.RequestID, err, "profile")
+		span.RecordError(err)
+		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
 		return err
 	}
 
-	profile, err := p.astroClient.GetAstroProfileContext(ctx, msg.Profile.BirthDate, msg.Profile.BirthPlace)
+	profile, err := p.astroClient.GetAstroProfileContext(tctx, msg.Profile.BirthDate, msg.Profile.BirthPlace)
 	if err != nil {
-		p.markFailed(tctx, msg.RequestID, err, "profile")
 		span.RecordError(err)
+		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
 		return fmt.Errorf("astro api profile: %w", err)
 	}
+
 	profile.UserID = msg.Profile.UserID
 	if profile.BirthDate == "" {
 		profile.BirthDate = msg.Profile.BirthDate
@@ -274,13 +298,13 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 	resultJSON, err := json.Marshal(profile)
 	if err != nil {
 		span.RecordError(err)
-		p.markFailed(spanctx, msg.RequestID, err, "profile")
+		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
 		return fmt.Errorf("marshal astro profile: %w", err)
 	}
 
 	if err := p.requestsRepo.UpdateStatus(tctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
 		span.RecordError(err)
-		astrologger.Error(ctx, "failed to mark profile request as completed", zap.Error(err))
+		astrologger.Error(tctx, "failed to mark profile request as completed", zap.Error(err))
 		return err
 	}
 
@@ -290,10 +314,29 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 	return nil
 }
 
-func (p *ProfileProcessor) markFailed(ctx context.Context, requestID string, err error, worker string) {
-	if updateErr := p.requestsRepo.UpdateStatus(ctx, requestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
-		astrologger.Error(ctx, "failed to mark request as failed", zap.String("worker", worker), zap.Error(updateErr))
+func (p *ProfileProcessor) markRetryOrFailed(ctx context.Context, requestID string, err error, worker string) {
+	status := p.nextFailureStatus(ctx, requestID, worker)
+	if updateErr := p.requestsRepo.UpdateStatus(ctx, requestID, status, nil, err.Error()); updateErr != nil {
+		p.logger.Error("failed to mark request after processing error",
+			zap.String("worker", worker),
+			zap.String("status", status),
+			zap.Error(updateErr))
 	}
+}
+
+func (p *ProfileProcessor) nextFailureStatus(ctx context.Context, requestID string, worker string) string {
+	status := requests.StatusRetry
+	req, err := p.requestsRepo.Get(ctx, requestID)
+	if err != nil {
+		p.logger.Warn("failed to read attempt_count before retry update",
+			zap.String("worker", worker),
+			zap.Error(err))
+		return status
+	}
+	if req.AttemptCount+1 >= requests.MaxProcessingAttempts {
+		status = requests.StatusFailed
+	}
+	return status
 }
 
 // RecommendProcessor обрабатывает сообщения astro.events.recommend.
@@ -325,29 +368,48 @@ func NewRecommendProcessor(
 	}
 }
 
-func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
+func (p *RecommendProcessor) markRetryOrFailed(ctx context.Context, requestID string, err error, worker string) {
+	status := p.nextFailureStatus(ctx, requestID, worker)
+	if updateErr := p.requestsRepo.UpdateStatus(ctx, requestID, status, nil, err.Error()); updateErr != nil {
+		p.logger.Error("failed to mark request after processing error",
+			zap.String("worker", worker),
+			zap.String("status", status),
+			zap.Error(updateErr))
+	}
+}
 
-	// 1. Парсим обёртку
-	var wrapped models.MessageWithTrace
-	if err := json.Unmarshal(message, &wrapped); err != nil {
-		return fmt.Errorf("validation: invalid profile payload: %w", err)
+func (p *RecommendProcessor) nextFailureStatus(ctx context.Context, requestID string, worker string) string {
+	status := requests.StatusRetry
+	req, err := p.requestsRepo.Get(ctx, requestID)
+	if err != nil {
+		p.logger.Warn("failed to read attempt_count before retry update",
+			zap.String("worker", worker),
+			zap.Error(err))
+		return status
+	}
+	if req.AttemptCount+1 >= requests.MaxProcessingAttempts {
+		status = requests.StatusFailed
+	}
+	return status
+}
+
+func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
+	payload, traceContext, err := workerPayload(message)
+	if err != nil {
+		return fmt.Errorf("validation: invalid recommend payload: %w", err)
 	}
 
-	// 2. Восстанавливаем трейс
-	carrier := propagation.MapCarrier(wrapped.TraceContext)
-	wctx := otel.GetTextMapPropagator().Extract(ctx, carrier)
+	wctx := traceContextFromMessage(ctx, traceContext)
 
-	// 3. Создаём спан обработчика
-	tracer := otel.Tracer("worker-profile")
-	spanctx, span := tracer.Start(wctx, "worker.handle-profile")
+	tracer := otel.Tracer("worker-recommend")
+	spanctx, span := tracer.Start(wctx, "worker.handle-recommend")
 	defer span.End()
 
-	// 4. Таймаут
 	tctx, cancel := context.WithTimeout(spanctx, 30*time.Second)
 	defer cancel()
 
 	var msg recommendPayload
-	if err := json.Unmarshal(wrapped.Payload, &msg); err != nil {
+	if err := json.Unmarshal(payload, &msg); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("validation: invalid recommend payload: %w", err)
 	}
@@ -363,28 +425,24 @@ func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
 
 	result, err := buildRecommendation(tctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient, p.astroClient, p.logger)
 	if err != nil {
-		if updateErr := p.requestsRepo.UpdateStatus(tctx, msg.RequestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
-			span.RecordError(err)
-			astrologger.Error(tctx, "failed to mark recommend request as failed", zap.Error(updateErr))
-		}
 		span.RecordError(err)
-		return err
+		p.markRetryOrFailed(tctx, msg.RequestID, err, "recommend")
+		return fmt.Errorf("recommend processing failed: %w", err)
 	}
 
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		if updateErr := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusFailed, nil, err.Error()); updateErr != nil {
-			span.RecordError(err)
-			astrologger.Error(tctx, "failed to mark recommend request as failed", zap.Error(updateErr))
-		}
 		span.RecordError(err)
+		p.markRetryOrFailed(tctx, msg.RequestID, err, "recommend")
 		return fmt.Errorf("marshal recommendation: %w", err)
 	}
-	if err := p.requestsRepo.UpdateStatus(ctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
-		astrologger.Error(tctx, "failed to mark recommend request as completed", zap.Error(err))
+
+	if err := p.requestsRepo.UpdateStatus(tctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
 		span.RecordError(err)
+		astrologger.Error(tctx, "failed to mark recommend request as completed", zap.Error(err))
 		return err
 	}
+
 	astrologger.Info(tctx, "recommendation generated",
 		zap.String("request_id", msg.RequestID),
 		zap.String("user_id", msg.Recommend.UserID))

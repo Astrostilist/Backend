@@ -63,8 +63,6 @@ func TestProfileProcessor_ValidationError(t *testing.T) {
 	reqRepo := reqmocks.NewMockRepository(ctrl)
 	astroClient := handlermocks.NewMockAstroProfileGetter(ctrl)
 
-	// Save и UpdateStatus не должны вызываться
-
 	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, zap.NewNop())
 
 	payload := wrapWithTrace(map[string]any{
@@ -79,7 +77,7 @@ func TestProfileProcessor_ValidationError(t *testing.T) {
 	require.Contains(t, err.Error(), "validation")
 }
 
-func TestProfileProcessor_AstroAPIFailureMarksRequestFailed(t *testing.T) {
+func TestProfileProcessor_AstroAPIFailureMarksRequestRetry(t *testing.T) {
 	t.Parallel()
 	ctrl := gomock.NewController(t)
 	userRepo := usermocks.NewMockRepository(ctrl)
@@ -89,7 +87,7 @@ func TestProfileProcessor_AstroAPIFailureMarksRequestFailed(t *testing.T) {
 	astroErr := errors.New("astro api down")
 	reqRepo.EXPECT().
 		Get(gomock.Any(), "req-1").
-		Return(requests.Request{RequestID: "req-1", Status: requests.StatusPending}, nil).Times(1)
+		Return(requests.Request{RequestID: "req-1", Status: requests.StatusPending}, nil).Times(2)
 	reqRepo.EXPECT().
 		StartProcessing(gomock.Any(), "req-1").
 		Return(true, nil).Times(1)
@@ -97,7 +95,7 @@ func TestProfileProcessor_AstroAPIFailureMarksRequestFailed(t *testing.T) {
 		GetAstroProfileContext(gomock.Any(), "1990-01-01", "Moscow").
 		Return(alisa.AstroProfile{}, astroErr).Times(1)
 	reqRepo.EXPECT().
-		UpdateStatus(gomock.Any(), "req-1", requests.StatusFailed, gomock.Nil(), gomock.Any()).
+		UpdateStatus(gomock.Any(), "req-1", requests.StatusRetry, gomock.Nil(), gomock.Any()).
 		Return(nil).Times(1)
 
 	p := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, zap.NewNop())
@@ -171,7 +169,7 @@ func TestRecommendProcessor_DuplicateCompletedIsSkipped(t *testing.T) {
 
 	reqRepo.EXPECT().
 		Get(gomock.Any(), "req-dup").
-		Return(requests.Request{RequestID: "req-dup", Status: requests.StatusCompleted}, nil).Times(1)
+		Return(requests.Request{RequestID: "req-dup", Status: requests.StatusCompleted, Result: []byte(`{"ok":true}`)}, nil).Times(1)
 
 	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, zap.NewNop())
 	payload := wrapWithTrace(map[string]any{
@@ -185,7 +183,7 @@ func TestRecommendProcessor_DuplicateCompletedIsSkipped(t *testing.T) {
 	require.NoError(t, p.Handle(context.Background(), payload))
 }
 
-func TestRecommendProcessor_ProcessingRequestIsNotCompleted(t *testing.T) {
+func TestRecommendProcessor_RedeliveredProcessingWithoutResultIsProcessed(t *testing.T) {
 	t.Parallel()
 	ctrl := gomock.NewController(t)
 	userRepo := usermocks.NewMockRepository(ctrl)
@@ -196,6 +194,16 @@ func TestRecommendProcessor_ProcessingRequestIsNotCompleted(t *testing.T) {
 	reqRepo.EXPECT().
 		Get(gomock.Any(), "req-processing").
 		Return(requests.Request{RequestID: "req-processing", Status: requests.StatusProcessing}, nil).Times(1)
+	reqRepo.EXPECT().
+		StartProcessing(gomock.Any(), "req-processing").
+		Return(true, nil).Times(1)
+	userRepo.EXPECT().Get(gomock.Any(), validUserID).
+		Return(user.User{UserID: validUserID, BirthDate: "1990-01-01"}, nil).Times(1)
+	rulesRepo.EXPECT().Match(gomock.Any(), gomock.Any()).Return([]string{"luxury"}, nil).Times(1)
+	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("awesome", nil).Times(1)
+	reqRepo.EXPECT().
+		UpdateStatus(gomock.Any(), "req-processing", requests.StatusCompleted, gomock.Any(), "").
+		Return(nil).Times(1)
 
 	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, zap.NewNop())
 	payload := wrapWithTrace(map[string]any{
@@ -206,4 +214,70 @@ func TestRecommendProcessor_ProcessingRequestIsNotCompleted(t *testing.T) {
 		},
 	})
 	require.NoError(t, p.Handle(context.Background(), payload))
+}
+
+func TestRecommendProcessor_RetryWithoutResultIsProcessed(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+	userRepo := usermocks.NewMockRepository(ctrl)
+	reqRepo := reqmocks.NewMockRepository(ctrl)
+	rulesRepo := rulemocks.NewMockRepository(ctrl)
+	ai := almocks.NewMockGenerator(ctrl)
+
+	reqRepo.EXPECT().
+		Get(gomock.Any(), "req-retry").
+		Return(requests.Request{RequestID: "req-retry", Status: requests.StatusRetry, AttemptCount: 1}, nil).Times(1)
+	reqRepo.EXPECT().
+		StartProcessing(gomock.Any(), "req-retry").
+		Return(true, nil).Times(1)
+	userRepo.EXPECT().Get(gomock.Any(), validUserID).
+		Return(user.User{UserID: validUserID, BirthDate: "1990-01-01"}, nil).Times(1)
+	rulesRepo.EXPECT().Match(gomock.Any(), gomock.Any()).Return([]string{"luxury"}, nil).Times(1)
+	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("ok after retry", nil).Times(1)
+	reqRepo.EXPECT().
+		UpdateStatus(gomock.Any(), "req-retry", requests.StatusCompleted, gomock.Any(), "").
+		Return(nil).Times(1)
+
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, zap.NewNop())
+	payload, _ := json.Marshal(map[string]any{
+		"request_id": "req-retry",
+		"recommend": map[string]any{
+			"user_id":  validUserID,
+			"scenario": "personal_style",
+		},
+	})
+	require.NoError(t, p.Handle(context.Background(), payload))
+}
+
+func TestRecommendProcessor_FifthFailureMarksFailed(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+	userRepo := usermocks.NewMockRepository(ctrl)
+	reqRepo := reqmocks.NewMockRepository(ctrl)
+	rulesRepo := rulemocks.NewMockRepository(ctrl)
+	ai := almocks.NewMockGenerator(ctrl)
+
+	workerErr := errors.New("user repo unavailable")
+	reqRepo.EXPECT().
+		Get(gomock.Any(), "req-last").
+		Return(requests.Request{RequestID: "req-last", Status: requests.StatusRetry, AttemptCount: 4}, nil).Times(2)
+	reqRepo.EXPECT().
+		StartProcessing(gomock.Any(), "req-last").
+		Return(true, nil).Times(1)
+	userRepo.EXPECT().Get(gomock.Any(), validUserID).
+		Return(user.User{}, workerErr).Times(1)
+	reqRepo.EXPECT().
+		UpdateStatus(gomock.Any(), "req-last", requests.StatusFailed, gomock.Nil(), gomock.Any()).
+		Return(nil).Times(1)
+
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, zap.NewNop())
+	payload, _ := json.Marshal(map[string]any{
+		"request_id": "req-last",
+		"recommend": map[string]any{
+			"user_id":  validUserID,
+			"scenario": "personal_style",
+		},
+	})
+	err := p.Handle(context.Background(), payload)
+	require.ErrorIs(t, err, workerErr)
 }

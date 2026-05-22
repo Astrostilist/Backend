@@ -18,7 +18,8 @@ import (
 )
 
 type MessageConsumer struct {
-	sm *JetStreamAdapter
+	sm      *JetStreamAdapter
+	backOff [4]time.Duration
 }
 
 type DLQReader struct {
@@ -26,7 +27,11 @@ type DLQReader struct {
 }
 
 func NewMessageConsumer(js *JetStreamAdapter) *MessageConsumer {
-	return &MessageConsumer{sm: js}
+	return &MessageConsumer{sm: js, backOff: defaultBackOff}
+}
+
+func (c *MessageConsumer) SetBackOffForTest(delays [4]time.Duration) {
+	c.backOff = delays
 }
 
 func NewDLQReader(js *JetStreamAdapter, logger *zap.Logger) *DLQReader {
@@ -109,8 +114,9 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 					// длительность задержки игнорируется, т к приоритет у настроек стрима,
 					// но на всякий случай продублируем здесь
 					delayID := min(attempt-1, 3)
-					if nackErr := msg.NakWithDelay(backOff[delayID]); nackErr != nil {
-						astrologger.Error(msgCtx, "Failed to negative acknowledge message",
+					if nackErr := msg.NakWithDelay(c.backOff[delayID]); nackErr != nil {
+						//if nackErr := msg.Nak(); nackErr != nil {
+						c.sm.logger.Error("Failed to negative acknowledge message",
 							zap.String("error", nackErr.Error()))
 					} else {
 						astrologger.Warn(msgCtx, "Message negative acknowledged",
@@ -118,7 +124,7 @@ func (c *MessageConsumer) ConsumeWithHandler(ctx context.Context, streamName, co
 							zap.String("subject", msg.Subject()),
 							zap.Uint64("msg_id", id),
 							zap.Uint64("attempt", attempt),
-							zap.Any("next_delay", backOff[delayID]),
+							zap.Any("next_delay", c.backOff[delayID]),
 							zap.Error(err))
 					}
 

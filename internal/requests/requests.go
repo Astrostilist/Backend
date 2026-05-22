@@ -18,8 +18,12 @@ var (
 const (
 	StatusPending    = "pending"
 	StatusProcessing = "processing"
+	StatusRetry      = "retry"
 	StatusCompleted  = "completed"
 	StatusFailed     = "failed"
+
+	// MaxProcessingAttempts задаёт общий лимит бизнес-попыток перед финальным failed/DLQ.
+	MaxProcessingAttempts = 5
 )
 
 // Request — состояние запроса и результата генерации по request_id.
