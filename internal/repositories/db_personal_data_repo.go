@@ -2,11 +2,13 @@ package repositories
 
 import (
 	"astroapi/internal/crypto"
-	"astroapi/internal/usecases/repositories/domain"
+	"astroapi/internal/repositories/domain"
 	"context"
 	"database/sql"
 	"fmt"
 	"time"
+
+	"go.opentelemetry.io/otel"
 )
 
 type dbPersonalDataRepo struct {
@@ -22,8 +24,13 @@ func NewDBPersonalDataRepository(db *sql.DB, encryptionKey []byte) PersonalDataR
 }
 
 func (r *dbPersonalDataRepo) Save(ctx context.Context, data domain.PersonalData) error {
+	tracer := otel.Tracer("db-repo")
+	repoctx, repoSpan := tracer.Start(ctx, "user-profile.Save")
+	defer repoSpan.End()
+
 	encryptedDob, err := crypto.Encrypt(data.DOB, r.key)
 	if err != nil {
+		repoSpan.RecordError(err)
 		return err
 	}
 	now := time.Now()
@@ -32,9 +39,11 @@ func (r *dbPersonalDataRepo) Save(ctx context.Context, data domain.PersonalData)
               ON CONFLICT (user_id) DO UPDATE SET
               encrypted_dob = EXCLUDED.encrypted_dob,
               updated_at = EXCLUDED.updated_at;`
-	_, err = r.db.ExecContext(ctx, query, data.UserID, encryptedDob, data.ConsentGiven, now, now)
+	_, err = r.db.ExecContext(repoctx, query, data.UserID, encryptedDob, data.ConsentGiven, now, now)
 	if err != nil {
-		return fmt.Errorf("error adding data to the users table: %w", err)
+		err := fmt.Errorf("error adding data to the users table: %w", err)
+		repoSpan.RecordError(err)
+		return err
 	}
 	return nil
 }

@@ -18,9 +18,9 @@ import (
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/metrics"
 	"astroapi/internal/models"
+	"astroapi/internal/repositories/domain"
 	"astroapi/internal/requests"
 	"astroapi/internal/usecases"
-	"astroapi/internal/usecases/repositories/domain"
 	"astroapi/internal/user"
 
 	"github.com/nats-io/nats-server/v2/server"

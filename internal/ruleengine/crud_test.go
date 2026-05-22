@@ -3,7 +3,7 @@
 package ruleengine
 
 import (
-	"astroapi/internal/logger"
+	"astroapi/internal/infrastructure/logger"
 	"context"
 	"database/sql"
 	"log"

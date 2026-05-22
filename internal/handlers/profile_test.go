@@ -9,9 +9,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"astroapi/internal/repositories/domain"
 	"astroapi/internal/requests"
 	"astroapi/internal/usecases"
-	"astroapi/internal/usecases/repositories/domain"
 
 	"go.uber.org/zap"
 )

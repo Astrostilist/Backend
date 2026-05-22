@@ -3,7 +3,7 @@ package repositories
 //go:generate mockgen -destination=mocks/mock_personal_data_repo.go -package=mocks . PersonalDataRepository
 
 import (
-	"astroapi/internal/usecases/repositories/domain"
+	"astroapi/internal/repositories/domain"
 	"context"
 )
 
