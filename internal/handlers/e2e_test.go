@@ -14,6 +14,7 @@ import (
 
 	"astroapi/config"
 	"astroapi/internal/alisa"
+	"astroapi/internal/astro"
 	"astroapi/internal/handlers"
 	natsinfra "astroapi/internal/infrastructure/nats"
 	"astroapi/internal/metrics"
@@ -130,12 +131,12 @@ type stubAI struct{ reply string }
 func (s stubAI) Generate(context.Context, string) (string, error) { return s.reply, nil }
 
 type stubAstroClient struct {
-	profile alisa.AstroProfile
-	err     error
+	natalData astro.NatalData
+	err       error
 }
 
-func (s stubAstroClient) GetAstroProfileContext(context.Context, string, string) (alisa.AstroProfile, error) {
-	return s.profile, s.err
+func (s stubAstroClient) GetNatalChart(context.Context, astro.DateOfBirth, float64, float64) (astro.NatalData, error) {
+	return s.natalData, s.err
 }
 
 type memPersonalDataRepo struct {
@@ -220,7 +221,7 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	personalDataRepo := newMemPersonalDataRepo()
 	personalDataCache := newMemPersonalDataCache()
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(personalDataRepo, personalDataCache)
-	astroClient := stubAstroClient{profile: alisa.AstroProfile{BirthDate: "1990-01-01", BirthPlace: "Moscow"}}
+	astroClient := stubAstroClient{natalData: testE2ENatalData()}
 
 	profileProc := handlers.NewProfileProcessor(userRepo, reqRepo, astroClient, logger)
 	router := handlers.NewMsgRouter(logger)
@@ -236,7 +237,10 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 	body := []byte(`{
 		"user_id":"123e4567-e89b-12d3-a456-426614174000",
 		"birth_date":"1990-01-01",
-		"birth_place":"Moscow",
+		"birth_time":"10:30",
+		"lat":55.75,
+		"lon":37.61,
+		"timezone":"Europe/Moscow",
 		"consent_given":true
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/profile", bytes.NewReader(body))
@@ -256,11 +260,10 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 
 	final, ok := reqRepo.lookup(requestID)
 	require.True(t, ok)
-	var profile alisa.AstroProfile
-	require.NoError(t, json.Unmarshal(final.Result, &profile))
-	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", profile.UserID)
-	require.Equal(t, "1990-01-01", profile.BirthDate)
-	require.Equal(t, "Moscow", profile.BirthPlace)
+	var natalData astro.NatalData
+	require.NoError(t, json.Unmarshal(final.Result, &natalData))
+	require.Equal(t, "external", natalData.Provider)
+	require.Contains(t, natalData.Triggers, "sun:capricorn")
 }
 
 // TestE2E_RecommendPipeline: async POST /astro/recommend → NATS → RecommendProcessor
@@ -294,7 +297,8 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 	rulesRepo := &memRulesRepo{tags: []string{"luxury"}}
 	ai := stubAI{reply: "e2e response"}
 
-	proc := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, nil, logger)
+	astroClient := stubAstroClient{natalData: testE2ENatalData()}
+	proc := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, astroClient, logger)
 	router := handlers.NewMsgRouter(logger)
 	router.Register(models.MsgRecommendSubj, proc)
 
@@ -304,13 +308,13 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 			return router.Dispatch(c, msg.Subject(), msg.Data())
 		}))
 
-	h := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, ai, nil, reqRepo, logger)
+	h := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, ai, astroClient, reqRepo, logger)
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
 		"scenario": "personal_style",
 		"mode":     "async",
-		"context":  map[string]any{"triggers": []string{"Полнолуние"}},
+		"context":  map[string]any{"triggers": []string{"Полнолуние"}, "lat": 55.75, "lon": 37.61},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
@@ -384,7 +388,10 @@ func TestE2E_ProfileFailureAfterFiveAttemptsGoesToDLQ(t *testing.T) {
 	body := []byte(`{
 		"user_id":"123e4567-e89b-12d3-a456-426614174001",
 		"birth_date":"1991-02-03",
-		"birth_place":"Moscow",
+		"birth_time":"10:30",
+		"lat":55.75,
+		"lon":37.61,
+		"timezone":"Europe/Moscow",
 		"consent_given":true
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/profile", bytes.NewReader(body))
@@ -447,8 +454,16 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Fatalf("condition not met within %s", timeout)
 }
 
+func testE2ENatalData() astro.NatalData {
+	return astro.NatalData{
+		Provider: "external",
+		Planets:  []astro.PlanetPosition{{Name: "Sun", Sign: "Capricorn"}},
+		Triggers: []string{"sun:capricorn"},
+	}
+}
+
 var (
-	_ handlers.RuleMatcher        = (*memRulesRepo)(nil)
-	_ handlers.AstroProfileGetter = stubAstroClient{}
-	_ alisa.Generator             = stubAI{}
+	_ handlers.RuleMatcher   = (*memRulesRepo)(nil)
+	_ handlers.AstroProvider = stubAstroClient{}
+	_ alisa.Generator        = stubAI{}
 )

@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"astroapi/internal/alisa"
+	"astroapi/internal/astro"
 	astrologger "astroapi/internal/infrastructure/logger"
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
@@ -24,10 +27,10 @@ type RuleMatcher interface {
 	Match(ctx context.Context, triggers []string) ([]string, error)
 }
 
-// AstroProfileGetter — узкий интерфейс внешнего Astro API клиента.
-// Реализуется alisa.AstroAPIClient; интерфейс оставлен маленьким для тестов воркеров.
-type AstroProfileGetter interface {
-	GetAstroProfileContext(ctx context.Context, birthDate, birthPlace string) (alisa.AstroProfile, error)
+// AstroProvider — узкий интерфейс внешнего провайдера натальной карты.
+// Бизнес-логика зависит только от внутреннего формата astro.NatalData.
+type AstroProvider interface {
+	GetNatalChart(ctx context.Context, dob astro.DateOfBirth, lat float64, lon float64) (astro.NatalData, error)
 }
 
 // RecommendationResult — результат построения рекомендации (общий для sync и async).
@@ -36,15 +39,15 @@ type RecommendationResult struct {
 	Tags []string `json:"tags"`
 }
 
-// buildRecommendation собирает профиль, триггеры, prompt и дергает AlisaAI.
-// Если в context передан birth_place, профиль дополнительно обогащается через Astro API.
+// buildRecommendation получает натальную карту через AstroProvider,
+// строит astro-триггеры, подбирает теги через ruleengine и вызывает AlisaAI.
 func buildRecommendation(
 	ctx context.Context,
 	req RecommendRequest,
 	userRepo user.Repository,
 	rulesRepo RuleMatcher,
 	ai alisa.Generator,
-	astroClient AstroProfileGetter,
+	astroProvider AstroProvider,
 	logger *zap.Logger,
 ) (RecommendationResult, error) {
 	u, err := userRepo.Get(ctx, req.UserID)
@@ -53,14 +56,14 @@ func buildRecommendation(
 	}
 
 	triggers, _ := triggersFromContext(req.Context)
+	natalData, err := buildNatalData(ctx, req, u, astroProvider)
+	if err != nil {
+		return RecommendationResult{}, err
+	}
+	triggers = appendUniqueTriggers(triggers, natalData.Triggers)
 	tags, err := rulesRepo.Match(ctx, triggers)
 	if err != nil {
 		return RecommendationResult{}, fmt.Errorf("match rules: %w", err)
-	}
-
-	astroProfile, err := buildAstroProfile(ctx, req, u, astroClient)
-	if err != nil {
-		return RecommendationResult{}, err
 	}
 
 	enrichedCtx := map[string]any{"tags": tags}
@@ -68,7 +71,7 @@ func buildRecommendation(
 		enrichedCtx[k] = v
 	}
 
-	prompt := alisa.BuildPrompt(req.Scenario, astroProfile, enrichedCtx, logger)
+	prompt := alisa.BuildPrompt(req.Scenario, natalData, enrichedCtx, logger)
 	if prompt == "" {
 		return RecommendationResult{}, fmt.Errorf("validation: cannot build prompt for scenario %q", req.Scenario)
 	}
@@ -81,39 +84,25 @@ func buildRecommendation(
 	return RecommendationResult{Text: text, Tags: tags}, nil
 }
 
-func buildAstroProfile(
+func buildNatalData(
 	ctx context.Context,
 	req RecommendRequest,
 	u user.User,
-	astroClient AstroProfileGetter,
-) (alisa.AstroProfile, error) {
-	birthPlace, _ := stringFromContext(req.Context, "birth_place")
-	profile := alisa.AstroProfile{
-		UserID:     u.UserID,
-		BirthDate:  u.BirthDate,
-		BirthPlace: birthPlace,
+	astroProvider AstroProvider,
+) (astro.NatalData, error) {
+	var natalData astro.NatalData
+	if astroProvider == nil {
+		return natalData, errors.New("astro provider is not configured")
 	}
-
-	if astroClient == nil || birthPlace == "" {
-		return profile, nil
-	}
-
-	apiProfile, err := astroClient.GetAstroProfileContext(ctx, u.BirthDate, birthPlace)
+	dob, lat, lon, err := natalInputFromRequest(req.Context, u.BirthDate)
 	if err != nil {
-		return profile, fmt.Errorf("astro api profile: %w", err)
+		return natalData, err
 	}
-
-	if apiProfile.UserID == "" {
-		apiProfile.UserID = u.UserID
+	natalData, err = astroProvider.GetNatalChart(ctx, dob, lat, lon)
+	if err != nil {
+		return natalData, fmt.Errorf("astro natal chart: %w", err)
 	}
-	if apiProfile.BirthDate == "" {
-		apiProfile.BirthDate = u.BirthDate
-	}
-	if apiProfile.BirthPlace == "" {
-		apiProfile.BirthPlace = birthPlace
-	}
-
-	return apiProfile, nil
+	return natalData, nil
 }
 
 // triggersFromContext достаёт список триггеров из context.
@@ -146,6 +135,128 @@ func stringFromContext(ctx map[string]any, key string) (string, bool) {
 		return "", false
 	}
 	return value, value != ""
+}
+
+func natalInputFromRequest(ctx map[string]any, birthDate string) (astro.DateOfBirth, float64, float64, error) {
+	parsedDate, err := time.Parse("2006-01-02", birthDate)
+	if err != nil {
+		return astro.DateOfBirth{}, 0, 0, fmt.Errorf("validation: birth_date must be YYYY-MM-DD: %w", err)
+	}
+	lat, hasLat := floatFromContext(ctx, "lat")
+	if !hasLat {
+		lat, hasLat = floatFromContext(ctx, "birth_lat")
+	}
+	lon, hasLon := floatFromContext(ctx, "lon")
+	if !hasLon {
+		lon, hasLon = floatFromContext(ctx, "birth_lon")
+	}
+	if !hasLat || !hasLon {
+		return astro.DateOfBirth{}, 0, 0, errors.New("validation: natal chart requires lat/lon or birth_lat/birth_lon")
+	}
+	hour, minute := timeFromContext(ctx, "birth_time")
+	timezone, _ := stringFromContext(ctx, "timezone")
+	dob := astro.DateOfBirth{
+		Year:     parsedDate.Year(),
+		Month:    int(parsedDate.Month()),
+		Day:      parsedDate.Day(),
+		Hour:     hour,
+		Minute:   minute,
+		Timezone: timezone,
+	}
+	return dob, lat, lon, nil
+}
+
+func appendUniqueTriggers(existing []string, incoming []string) []string {
+	seen := make(map[string]struct{}, len(existing)+len(incoming))
+	result := make([]string, 0, len(existing)+len(incoming))
+	for _, trigger := range existing {
+		if _, ok := seen[trigger]; !ok {
+			result = append(result, trigger)
+			seen[trigger] = struct{}{}
+		}
+	}
+	for _, trigger := range incoming {
+		if _, ok := seen[trigger]; !ok {
+			result = append(result, trigger)
+			seen[trigger] = struct{}{}
+		}
+	}
+	return result
+}
+
+func floatFromContext(ctx map[string]any, key string) (float64, bool) {
+	raw, ok := ctx[key]
+	if !ok {
+		return 0, false
+	}
+	result := 0.0
+	success := true
+	switch value := raw.(type) {
+	case float64:
+		result = value
+	case float32:
+		result = float64(value)
+	case int:
+		result = float64(value)
+	case json.Number:
+		parsed, err := value.Float64()
+		if err != nil {
+			success = false
+		} else {
+			result = parsed
+		}
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil {
+			success = false
+		} else {
+			result = parsed
+		}
+	default:
+		success = false
+	}
+	return result, success
+}
+
+func natalInputFromProfile(profile ProfileRequest) (astro.DateOfBirth, float64, float64, error) {
+	parsedDate, err := time.Parse("2006-01-02", profile.BirthDate)
+	if err != nil {
+		return astro.DateOfBirth{}, 0, 0, fmt.Errorf("validation: birth_date must be YYYY-MM-DD: %w", err)
+	}
+	if profile.Lat == nil || profile.Lon == nil {
+		return astro.DateOfBirth{}, 0, 0, errors.New("validation: natal chart requires lat and lon")
+	}
+	hour, minute := timeFromValue(profile.BirthTime)
+	dob := astro.DateOfBirth{
+		Year:     parsedDate.Year(),
+		Month:    int(parsedDate.Month()),
+		Day:      parsedDate.Day(),
+		Hour:     hour,
+		Minute:   minute,
+		Timezone: profile.Timezone,
+	}
+	return dob, *profile.Lat, *profile.Lon, nil
+}
+
+func timeFromContext(ctx map[string]any, key string) (int, int) {
+	value, ok := stringFromContext(ctx, key)
+	if !ok {
+		return 0, 0
+	}
+	return timeFromValue(value)
+}
+
+func timeFromValue(value string) (int, int) {
+	parts := strings.Split(value, ":")
+	if len(parts) < 2 {
+		return 0, 0
+	}
+	hour, hourErr := strconv.Atoi(parts[0])
+	minute, minuteErr := strconv.Atoi(parts[1])
+	if hourErr != nil || minuteErr != nil {
+		return 0, 0
+	}
+	return hour, minute
 }
 
 func workerPayload(message []byte) (json.RawMessage, map[string]string, error) {
@@ -219,18 +330,18 @@ func beginRequestProcessing(
 // ProfileProcessor обрабатывает сообщения astro.events.profile.
 // Воркер вызывает внешний Astro API, пишет результат в requests_log и завершает задачу.
 type ProfileProcessor struct {
-	requestsRepo requests.Repository
-	astroClient  AstroProfileGetter
-	logger       *zap.Logger
+	requestsRepo  requests.Repository
+	astroProvider AstroProvider
+	logger        *zap.Logger
 }
 
 func NewProfileProcessor(
 	_ user.Repository,
 	requestsRepo requests.Repository,
-	astroClient AstroProfileGetter,
+	astroProvider AstroProvider,
 	logger *zap.Logger,
 ) *ProfileProcessor {
-	return &ProfileProcessor{requestsRepo: requestsRepo, astroClient: astroClient, logger: logger}
+	return &ProfileProcessor{requestsRepo: requestsRepo, astroProvider: astroProvider, logger: logger}
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
@@ -270,36 +381,32 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 		return nil
 	}
 
-	if p.astroClient == nil {
-		err := errors.New("astro profile client is not configured")
+	if p.astroProvider == nil {
+		err := errors.New("astro provider is not configured")
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
 		return err
 	}
 
-	profile, err := p.astroClient.GetAstroProfileContext(tctx, msg.Profile.BirthDate, msg.Profile.BirthPlace)
+	dob, lat, lon, err := natalInputFromProfile(msg.Profile)
 	if err != nil {
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
-		return fmt.Errorf("astro api profile: %w", err)
+		return err
 	}
 
-	profile.UserID = msg.Profile.UserID
-	if profile.BirthDate == "" {
-		profile.BirthDate = msg.Profile.BirthDate
-	}
-	if profile.BirthTime == "" {
-		profile.BirthTime = msg.Profile.BirthTime
-	}
-	if profile.BirthPlace == "" {
-		profile.BirthPlace = msg.Profile.BirthPlace
-	}
-
-	resultJSON, err := json.Marshal(profile)
+	natalData, err := p.astroProvider.GetNatalChart(tctx, dob, lat, lon)
 	if err != nil {
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
-		return fmt.Errorf("marshal astro profile: %w", err)
+		return fmt.Errorf("astro natal chart: %w", err)
+	}
+
+	resultJSON, err := json.Marshal(natalData)
+	if err != nil {
+		span.RecordError(err)
+		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
+		return fmt.Errorf("marshal natal chart: %w", err)
 	}
 
 	if err := p.requestsRepo.UpdateStatus(tctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
@@ -342,12 +449,12 @@ func (p *ProfileProcessor) nextFailureStatus(ctx context.Context, requestID stri
 // RecommendProcessor обрабатывает сообщения astro.events.recommend.
 // Строит рекомендацию через Astro API + AlisaAI и пишет результат в requests_log.
 type RecommendProcessor struct {
-	userRepo     user.Repository
-	requestsRepo requests.Repository
-	rulesRepo    RuleMatcher
-	aiClient     alisa.Generator
-	astroClient  AstroProfileGetter
-	logger       *zap.Logger
+	userRepo      user.Repository
+	requestsRepo  requests.Repository
+	rulesRepo     RuleMatcher
+	aiClient      alisa.Generator
+	astroProvider AstroProvider
+	logger        *zap.Logger
 }
 
 func NewRecommendProcessor(
@@ -355,16 +462,16 @@ func NewRecommendProcessor(
 	requestsRepo requests.Repository,
 	rulesRepo RuleMatcher,
 	aiClient alisa.Generator,
-	astroClient AstroProfileGetter,
+	astroProvider AstroProvider,
 	logger *zap.Logger,
 ) *RecommendProcessor {
 	return &RecommendProcessor{
-		userRepo:     userRepo,
-		requestsRepo: requestsRepo,
-		rulesRepo:    rulesRepo,
-		aiClient:     aiClient,
-		astroClient:  astroClient,
-		logger:       logger,
+		userRepo:      userRepo,
+		requestsRepo:  requestsRepo,
+		rulesRepo:     rulesRepo,
+		aiClient:      aiClient,
+		astroProvider: astroProvider,
+		logger:        logger,
 	}
 }
 
@@ -423,7 +530,7 @@ func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
 		return nil
 	}
 
-	result, err := buildRecommendation(tctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient, p.astroClient, p.logger)
+	result, err := buildRecommendation(tctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient, p.astroProvider, p.logger)
 	if err != nil {
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "recommend")

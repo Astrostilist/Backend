@@ -8,6 +8,8 @@ import (
 	"sync"
 	"text/template"
 
+	"astroapi/internal/astro"
+
 	"go.uber.org/zap"
 )
 
@@ -25,14 +27,17 @@ var (
 )
 
 type promptData struct {
-	Scenario     string
-	AstroProfile AstroProfile
-	Context      map[string]any
+	Scenario  string
+	NatalData astro.NatalData
+	Context   map[string]any
 }
 
-func BuildPrompt(scenario string, astroProfile AstroProfile, context map[string]any, logger *zap.Logger) string {
+func BuildPrompt(scenario string, natalData astro.NatalData, context map[string]any, logger *zap.Logger) string {
 	if context == nil {
 		context = map[string]any{}
+	}
+	if logger == nil {
+		logger = zap.NewNop()
 	}
 
 	tmpl := loadPromptTemplates(logger)
@@ -49,9 +54,9 @@ func BuildPrompt(scenario string, astroProfile AstroProfile, context map[string]
 
 	var result bytes.Buffer
 	err := tmpl.ExecuteTemplate(&result, templateName, promptData{
-		Scenario:     scenario,
-		AstroProfile: astroProfile,
-		Context:      context,
+		Scenario:  scenario,
+		NatalData: natalData,
+		Context:   context,
 	})
 	if err != nil {
 		logger.Error("failed to build AlisaAI prompt", zap.String("scenario", scenario), zap.Error(err))

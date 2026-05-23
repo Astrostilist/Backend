@@ -18,6 +18,7 @@ import (
 	"astroapi/internal/admin"
 	"astroapi/internal/adminlogs"
 	"astroapi/internal/alisa"
+	"astroapi/internal/astro"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
 	infra "astroapi/internal/infrastructure"
@@ -163,7 +164,10 @@ func run() error {
 		},
 	)
 
-	astroClient := alisa.NewAstroAPIClientFromConfig(cfg, js, zapLogger, metricsReporter)
+	astroClient, err := astro.NewClientFromConfig(cfg, js, zapLogger, metricsReporter)
+	if err != nil {
+		return fmt.Errorf("failed to init astro provider: %w", err)
+	}
 
 	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, astroClient, zapLogger)
 	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, astroClient, zapLogger)
