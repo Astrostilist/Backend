@@ -1,20 +1,21 @@
 package handlers
 
 import (
-	"encoding/json"
-	"errors"
-	"io"
-	"net/http"
-	"strings"
-	"time"
-
+	astrologger "astroapi/internal/infrastructure/logger"
 	"astroapi/internal/models"
 	"astroapi/internal/repositories/domain"
 	"astroapi/internal/requests"
 	"astroapi/internal/resilience"
 	"astroapi/internal/usecases"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -24,11 +25,14 @@ const (
 )
 
 type ProfileRequest struct {
-	UserID       string `json:"user_id"`
-	BirthDate    string `json:"birth_date"`
-	BirthTime    string `json:"birth_time,omitempty"`
-	BirthPlace   string `json:"birth_place"`
-	ConsentGiven bool   `json:"consent_given"`
+	UserID       string   `json:"user_id"`
+	BirthDate    string   `json:"birth_date"`
+	BirthTime    string   `json:"birth_time,omitempty"`
+	BirthPlace   string   `json:"birth_place,omitempty"`
+	Lat          *float64 `json:"lat"`
+	Lon          *float64 `json:"lon"`
+	Timezone     string   `json:"timezone,omitempty"`
+	ConsentGiven bool     `json:"consent_given"`
 }
 
 // ProfileHandler обрабатывает POST /api/v1/astro/profile.
@@ -57,8 +61,11 @@ func (req *ProfileRequest) Validate() map[string]string {
 	if _, err := time.Parse("2006-01-02", req.BirthDate); err != nil {
 		errs["birth_date"] = "must be in ISO 8601 format (YYYY-MM-DD)"
 	}
-	if strings.TrimSpace(req.BirthPlace) == "" {
-		errs["birth_place"] = "must not be empty"
+	if req.Lat == nil {
+		errs["lat"] = "is required for natal chart calculation"
+	}
+	if req.Lon == nil {
+		errs["lon"] = "is required for natal chart calculation"
 	}
 	return errs
 }
@@ -83,6 +90,16 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+
+	rctx := r.Context()
+	requestID := uuid.New().String()
+
+	// Span для бизнес-логики хэндлера
+	tracer := otel.Tracer("http-api")
+	hctx, handlerSpan := tracer.Start(rctx, "handler.profile")
+	handlerSpan.SetAttributes(attribute.String("request_id", requestID))
+	defer handlerSpan.End()
+
 	r.Body = http.MaxBytesReader(w, r.Body, profileMaxBodyBytes)
 
 	var req ProfileRequest
@@ -90,9 +107,11 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		status := http.StatusBadRequest
 		if errors.Is(err, io.EOF) {
 			writeError(w, status, "request body is required")
+			handlerSpan.RecordError(err)
 			return
 		}
 		writeError(w, status, "invalid json format")
+		handlerSpan.RecordError(err)
 		return
 	}
 
@@ -101,27 +120,27 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 			"error":   "validation_failed",
 			"details": validationErrors,
 		})
+		handlerSpan.RecordError(errors.New("validation error"))
 		return
 	}
-
-	requestID := uuid.New().String()
 
 	// TODO:
 	// + begin transaction
 	// store user request
-	if err := h.requestsRepo.Create(r.Context(), requests.Request{
+	if err := h.requestsRepo.Create(hctx, requests.Request{
 		RequestID: requestID,
 		UserID:    req.UserID,
 		Scenario:  profileScenarioName,
 		Status:    requests.StatusPending,
 	}); err != nil {
-		h.logger.Error("failed to create requests_log entry", zap.Error(err))
+		astrologger.Error(hctx, "failed to create requests_log entry", zap.Error(err))
+		handlerSpan.RecordError(err)
 		writeError(w, http.StatusInternalServerError, "failed to create request")
 		return
 	}
 
 	// store user (DB or cache)
-	err := h.uc.Execute(r.Context(), usecases.ProcessPersonalDataInput{
+	err := h.uc.Execute(hctx, usecases.ProcessPersonalDataInput{
 		PersonalData: domain.PersonalData{
 			UserID:       req.UserID,
 			DOB:          req.BirthDate,
@@ -130,8 +149,8 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
-		h.logger.Error("failed to process personal data", zap.Error(err))
-
+		astrologger.Error(hctx, "failed to process personal data", zap.Error(err))
+		handlerSpan.RecordError(err)
 		if resilience.IsServiceUnavailable(err) {
 			writeError(w, http.StatusServiceUnavailable, "service unavailable")
 			return
@@ -141,9 +160,12 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pubctx, publishSpan := tracer.Start(hctx, "nats.publish-profile")
+	defer publishSpan.End()
 	payload := profilePayload{RequestID: requestID, Profile: req}
-	if err := h.publisher.PublishMessage(r.Context(), models.MsgStreamEvents, models.MsgProfileSubj, payload); err != nil {
-		h.logger.Error("failed to publish profile event", zap.Error(err))
+	if err := h.publisher.PublishMessage(hctx, models.MsgStreamEvents, models.MsgProfileSubj, payload); err != nil {
+		astrologger.Error(pubctx, "failed to publish profile event", zap.Error(err))
+		publishSpan.RecordError(err)
 		writeError(w, http.StatusInternalServerError, "failed to publish event")
 		return
 	}
@@ -154,6 +176,7 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	if err := json.NewEncoder(w).Encode(map[string]string{"request_id": requestID}); err != nil {
-		h.logger.Error("failed to encode profile response", zap.Error(err))
+		handlerSpan.RecordError(err)
+		astrologger.Error(hctx, "failed to encode profile response", zap.Error(err))
 	}
 }

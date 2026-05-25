@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"astroapi/internal/logger"
+	"astroapi/internal/infrastructure/logger"
 	"astroapi/internal/repositories"
 	"net/http"
 	"strings"

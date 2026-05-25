@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -17,12 +18,12 @@ import (
 	"astroapi/internal/admin"
 	"astroapi/internal/adminlogs"
 	"astroapi/internal/alisa"
+	"astroapi/internal/astro"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
 	infra "astroapi/internal/infrastructure"
 	health "astroapi/internal/infrastructure/health"
 	natsinfra "astroapi/internal/infrastructure/nats"
-	"astroapi/internal/logger"
 	"astroapi/internal/metrics"
 	astromidware "astroapi/internal/middleware"
 	"astroapi/internal/models"
@@ -37,6 +38,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nats-io/nats.go/jetstream"
+
+	astrologger "astroapi/internal/infrastructure/logger"
+	tracer "astroapi/internal/infrastructure/tracer"
+
 	"go.uber.org/zap"
 )
 
@@ -64,17 +69,9 @@ func run() error {
 		return err
 	}
 
-	if cfg.SecretTokenAdmin == "" {
-		log.Println("warning: SECRET_TOKEN_ADMIN is not set, admin endpoints will reject all requests")
-	}
-
-	if cfg.BotAPIKey == "" {
-		log.Println("warning: BOT_API_KEY is not set, client endpoints will reject all requests")
-	}
-
-	zapLogger, err := logger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
+	zapLogger, err := astrologger.NewLogger(cfg.LogServiceName, cfg.LogLevel)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init logger: %w", err)
 	}
 
 	mc := memcache.New(cfg.MemcachedHost)
@@ -85,43 +82,57 @@ func run() error {
 		}
 	}()
 
+	// Переходим на глобальный логгер
+	astrologger.SetGlobalLogger(zapLogger)
+
+	if cfg.SecretTokenAdmin == "" {
+		astrologger.Warn(context.Background(), "config validation: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
+	}
+	if cfg.BotAPIKey == "" {
+		astrologger.Warn(context.Background(), "config validation: BOT_API_KEY is not set, client endpoints will reject all requests")
+	}
+
 	metrics.Initialize(cfg)
 	metricsReporter := metrics.CircuitBreakerReporter{}
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 
+	err = tracer.InitTracer(rootCtx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to init tracer: %w", err)
+	}
+
 	db, err := database.New(rootCtx, cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init db: %w", err)
 	}
 
 	defer func() {
 		if closeErr := db.Close(); closeErr != nil {
-			zapLogger.Error("failed to close database", zap.Error(closeErr))
+			astrologger.Error(context.Background(), "failed to close database", zap.Error(closeErr))
 		}
 	}()
 
 	natsConn, err := natsinfra.InitNATS(rootCtx, zapLogger, cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init nats: %w", err)
 	}
 
 	defer natsConn.DrainNATS()
 
 	js, err := jetstream.New(natsConn.Conn)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init nats jet stream: %w", err)
 	}
 
 	jsAdapter := natsinfra.NewJetStreamRepository(js, zapLogger)
 
 	initCtx, initCancel := context.WithTimeout(rootCtx, initTimeout)
+	defer initCancel()
 	if err := jsAdapter.InitializeStreams(initCtx); err != nil {
-		initCancel()
-		return err
+		return fmt.Errorf("failed to init streams: %w", err)
 	}
-	initCancel()
 
 	publisher := natsinfra.NewMessagePublisher(jsAdapter)
 
@@ -156,7 +167,10 @@ func run() error {
 		},
 	)
 
-	astroClient := alisa.NewAstroAPIClientFromConfig(cfg, js, zapLogger, metricsReporter)
+	astroClient, err := astro.NewClientFromConfig(cfg, js, zapLogger, metricsReporter)
+	if err != nil {
+		return fmt.Errorf("failed to init astro provider: %w", err)
+	}
 
 	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, astroClient, zapLogger)
 	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, astroClient, zapLogger)
@@ -178,7 +192,7 @@ func run() error {
 				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
 			},
 		); consumeErr != nil {
-			zapLogger.Error("profile worker failed", zap.Error(consumeErr))
+			astrologger.Error(rootCtx, "profile worker failed", zap.Error(consumeErr))
 		}
 		<-rootCtx.Done()
 	})
@@ -192,7 +206,7 @@ func run() error {
 				return msgRouter.Dispatch(ctx, msg.Subject(), msg.Data())
 			},
 		); consumeErr != nil {
-			zapLogger.Error("recommend worker failed", zap.Error(consumeErr))
+			astrologger.Error(rootCtx, "recommend worker failed", zap.Error(consumeErr))
 		}
 
 		<-rootCtx.Done()
@@ -208,7 +222,7 @@ func run() error {
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
 	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, astroClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
-	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
+	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil, zapLogger)
 	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
 	authHandler := handlers.NewAuthHandler(adminRepo, cfg.SecretTokenAdmin, mc)
 	feedbackHandler := handlers.NewFeedbackHandler(repositories.NewFeedbackRepository(db.DB))
@@ -217,32 +231,36 @@ func run() error {
 	dlqViewerHandler := handlers.NewDLQViewerHandler(dlqReader, zapLogger)
 
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(astromidware.RequestMetricsMiddleware())
-	r.Use(astromidware.RequestLogger(zapLogger))
-	r.Use(middleware.Recoverer)
-
-	r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 
 	r.Group(func(r chi.Router) {
-		r.Use(handlers.ClientAuthMiddleware(cfg.BotAPIKey))
-		r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
-		r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
-		r.Post("/api/v1/feedback", feedbackHandler.CreateFeedback)
-		r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
-		r.Delete("/api/v1/user/{user_id}", h.OblivionHandler)
-	})
+		r.Use(middleware.RequestID)
+		r.Use(astromidware.TracingMiddleware)
+		r.Use(astromidware.RequestLogger)
+		r.Use(astromidware.RequestMetricsMiddleware)
+		r.Use(middleware.Recoverer)
 
-	r.Post("/api/v1/auth/login", authHandler.Login)
-	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
+		r.Get("/api/v1/", helloHandler.HelloWorldHandler)
 
-	handlers.RegisterAdminRulesRoutes(r, cfg.SecretTokenAdmin, mc, adminRulesHandler)
-	handlers.RegisterAdminProductsRoutes(r, cfg.SecretTokenAdmin, mc, adminProductsHandler)
-	handlers.RegisterAdminLogsRoutes(r, cfg.SecretTokenAdmin, mc, adminLogsHandler)
+		r.Group(func(r chi.Router) {
+			r.Use(handlers.ClientAuthMiddleware(cfg.BotAPIKey))
+			r.Post("/api/v1/astro/profile", profileHandler.HandleProfile)
+			r.Post("/api/v1/astro/recommend", recommendHandler.Handle)
+			r.Post("/api/v1/feedback", feedbackHandler.CreateFeedback)
+			r.Post("/api/v1/astro/feedback", feedbackHandler.CreateFeedback)
+			r.Delete("/api/v1/user/{user_id}", h.OblivionHandler)
+		})
 
-	r.Group(func(r chi.Router) {
-		r.Use(handlers.AdminAuthMiddleware(mc, cfg.SecretTokenAdmin))
-		r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
+		r.Post("/api/v1/auth/login", authHandler.Login)
+		r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
+
+		handlers.RegisterAdminRulesRoutes(r, cfg.SecretTokenAdmin, mc, adminRulesHandler)
+		handlers.RegisterAdminProductsRoutes(r, cfg.SecretTokenAdmin, mc, adminProductsHandler)
+		handlers.RegisterAdminLogsRoutes(r, cfg.SecretTokenAdmin, mc, adminLogsHandler)
+
+		r.Group(func(r chi.Router) {
+			r.Use(handlers.AdminAuthMiddleware(mc, cfg.SecretTokenAdmin))
+			r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
+		})
 	})
 
 	r.Handle("/metrics", metrics.NewHandler())
@@ -259,12 +277,10 @@ func run() error {
 	serverErr := make(chan error, 1)
 
 	go func() {
-		zapLogger.Info("app starting", zap.String("addr", srv.Addr))
-
+		astrologger.Info(rootCtx, "app starting", zap.String("addr", srv.Addr))
 		if listenErr := srv.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
 			serverErr <- listenErr
 		}
-
 		close(serverErr)
 	}()
 
@@ -273,7 +289,7 @@ func run() error {
 
 	select {
 	case <-quit:
-		zapLogger.Info("shutdown signal received")
+		astrologger.Info(rootCtx, "shutdown signal received")
 	case serverRunErr := <-serverErr:
 		if serverRunErr != nil {
 			return serverRunErr
@@ -283,14 +299,19 @@ func run() error {
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancelShutdown()
 
+	defer func() {
+		if err := tracer.Shutdown(shutdownCtx); err != nil {
+			astrologger.Error(shutdownCtx, "error shutting down tracer provider: %w", zap.Error(err))
+		}
+	}()
+
 	if shutdownErr := srv.Shutdown(shutdownCtx); shutdownErr != nil {
-		zapLogger.Error("server shutdown error", zap.Error(shutdownErr))
+		astrologger.Error(shutdownCtx, "server shutdown error", zap.Error(shutdownErr))
 	}
 
 	rootCancel()
 
 	done := make(chan struct{})
-
 	go func() {
 		wg.Wait()
 		close(done)
@@ -298,12 +319,11 @@ func run() error {
 
 	select {
 	case <-done:
-		zapLogger.Info("all workers stopped")
+		astrologger.Info(context.Background(), "all workers stopped")
 	case <-time.After(15 * time.Second):
-		zapLogger.Warn("timeout waiting workers shutdown")
+		astrologger.Warn(context.Background(), "timeout waiting workers shutdown")
 	}
-
-	zapLogger.Info("server exited")
+	astrologger.Info(context.Background(), "server exited")
 
 	return nil
 }

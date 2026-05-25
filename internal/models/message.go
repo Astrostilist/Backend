@@ -1,5 +1,7 @@
 package models
 
+import "encoding/json"
+
 const (
 	MsgStreamEvents  = "astro_events"
 	MsgStreamDLQ     = "astro_dlq"
@@ -11,6 +13,11 @@ const (
 	MsgProfileSubj   = "astro.events.profile"
 	MsgRecommendSubj = "astro.events.recommend"
 )
+
+type MessageWithTrace struct {
+	TraceContext map[string]string `json:"trace_context"`
+	Payload      json.RawMessage   `json:"payload"`
+}
 
 type Message struct {
 	Subject string              `json:"subject"`

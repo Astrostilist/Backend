@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -20,8 +21,13 @@ type Config struct {
 
 	MemcachedHost string
 
-	JaegerEndpoint    string
-	JaegerServiceName string
+	// Tracing
+	JaegerEndpoint     string
+	JaegerServiceName  string
+	JaegerOtelEndpoint string
+	JaegerInsecure     bool
+	JaegerSamplingRate float64
+	JaegerSendTimeout  time.Duration
 
 	// Database
 	DBHost     string
@@ -45,10 +51,12 @@ type Config struct {
 	NATSClientID  string
 
 	// AI
-	AIBaseURL   string
-	AIAPIKey    string
-	AIModelURL  string
-	AstroAPIURL string
+	AIBaseURL     string
+	AIAPIKey      string
+	AIModelURL    string
+	AstroProvider string
+	AstroAPIURL   string
+	AstroAPIKey   string
 }
 
 // Load читает переменные окружения. .env-файл подхватывается один раз здесь,
@@ -63,8 +71,12 @@ func Load() *Config {
 		LogLevel:       getEnv("LOG_LEVEL", "INFO"),
 		Environment:    getEnv("ENVIRONMENT", "dev"),
 
-		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
-		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
+		JaegerEndpoint:     getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
+		JaegerServiceName:  getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
+		JaegerOtelEndpoint: getEnv("JAEGER_OTEL_ENDPOINT", "jaeger:4318"),
+		JaegerInsecure:     getEnvAsBool("JAEGER_INSECURE", false),
+		JaegerSamplingRate: getEnvAsFloat64("JAEGER_SAMPLING_RATE", 0.1),
+		JaegerSendTimeout:  getEnvAsDuration("JAEGER_SEND_TIMEOUT", 10*time.Second),
 
 		SecretTokenAdmin: getEnv("SECRET_TOKEN_ADMIN", ""),
 		BotAPIKey:        getEnv("BOT_API_KEY", ""),
@@ -90,10 +102,12 @@ func Load() *Config {
 		NATSClusterID: getEnv("NATS_CLUSTER_ID", "test-cluster"),
 		NATSClientID:  getEnv("NATS_CLIENT_ID", "astro-backend"),
 
-		AIBaseURL:   getEnv("AI_BASE_URL", "https://ai.api.cloud.yandex.net/v1"),
-		AIAPIKey:    getEnv("AI_API_KEY", ""),
-		AIModelURL:  getEnv("AI_MODEL_URL", ""),
-		AstroAPIURL: getEnv("ASTRO_API_URL", ""),
+		AIBaseURL:     getEnv("AI_BASE_URL", "https://ai.api.cloud.yandex.net/v1"),
+		AIAPIKey:      getEnv("AI_API_KEY", ""),
+		AIModelURL:    getEnv("AI_MODEL_URL", ""),
+		AstroProvider: getEnv("ASTRO_PROVIDER", "external"),
+		AstroAPIURL:   getEnv("ASTRO_API_URL", ""),
+		AstroAPIKey:   getEnv("ASTRO_API_KEY", getEnv("FREE_ASTRO_API_KEY", "")),
 	}
 }
 
@@ -113,10 +127,33 @@ func getEnvAsInt32(key string, defaultValue int32) int32 {
 	return defaultValue
 }
 
+func getEnvAsFloat64(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if fVal, err := strconv.ParseFloat(value, 64); err == nil {
+			return float64(fVal)
+		}
+	}
+	return defaultValue
+}
+
 func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		if duration, err := time.ParseDuration(value); err == nil {
 			return duration
+		}
+	}
+	return defaultValue
+}
+
+func getEnvAsBool(key string, defaultValue bool) bool {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		switch value {
+		case "true":
+			return true
+		case "false":
+			return false
+		default:
+			return defaultValue
 		}
 	}
 	return defaultValue
