@@ -65,8 +65,10 @@ func addUserJTI(cache *memcache.Client, userID, jti string, ttl int32) error {
 		var jtis []string
 		if err == nil {
 			// Ключ существует — парсим JSON-массив в срез jtis
-			json.Unmarshal(item.Value, &jtis)
-		} else if err != memcache.ErrCacheMiss {
+			if unmarshalErr := json.Unmarshal(item.Value, &jtis); unmarshalErr != nil {
+				return unmarshalErr
+			}
+		} else if !errors.Is(err, memcache.ErrCacheMiss) {
 			// Реальная ошибка (сеть, таймаут) — сразу возвращаем
 			return err
 		}
@@ -82,7 +84,7 @@ func addUserJTI(cache *memcache.Client, userID, jti string, ttl int32) error {
 				Value: newValue,
 				CasID: item.CasID,
 			})
-			if err == memcache.ErrCASConflict {
+			if errors.Is(err, memcache.ErrCASConflict) {
 				// Кто-то другой уже изменил ключ — начинаем заново
 				continue
 			}
@@ -100,7 +102,7 @@ func addUserJTI(cache *memcache.Client, userID, jti string, ttl int32) error {
 func revokeAllUserTokens(cache *memcache.Client, userID string) error {
 	key := "user_tokens:" + userID
 	item, err := cache.Get(key)
-	if err == memcache.ErrCacheMiss {
+	if errors.Is(err, memcache.ErrCacheMiss) {
 		return nil
 	}
 	if err != nil {
@@ -112,7 +114,7 @@ func revokeAllUserTokens(cache *memcache.Client, userID string) error {
 	}
 	// Удаляем каждый jti
 	for _, j := range jtis {
-		cache.Delete("auth:jti:" + j) // ошибки игнорируем, т.к. ключ может уже истечь
+		_ = cache.Delete("auth:jti:" + j) // ошибки игнорируем, т.к. ключ может уже истечь
 	}
 	// Удаляем сам список
 	return cache.Delete(key)
@@ -123,15 +125,17 @@ func removeJTIFromUserList(cache *memcache.Client, userID, jti string) error {
 	key := "user_tokens:" + userID
 	for {
 		item, err := cache.Get(key)
-		if err == memcache.ErrCacheMiss {
-			return nil // ключа нет — ок
+		if errors.Is(err, memcache.ErrCacheMiss) {
+			return nil
 		}
 		if err != nil {
 			return err
 		}
 
 		var jtis []string
-		json.Unmarshal(item.Value, &jtis)
+		if err := json.Unmarshal(item.Value, &jtis); err != nil {
+			return err
+		}
 
 		filtered := jtis[:0]
 		for _, j := range jtis {
@@ -146,7 +150,7 @@ func removeJTIFromUserList(cache *memcache.Client, userID, jti string) error {
 			Value: newValue,
 			CasID: item.CasID,
 		})
-		if err == memcache.ErrCASConflict {
+		if errors.Is(err, memcache.ErrCASConflict) {
 			continue
 		}
 		return nil
@@ -193,11 +197,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Сохраняем jti в memcached auth:jti:{jti} {user_id} EX {exp}
-	err = saveJTItoMemcached(h.cache, jti, user.ID, int32(adminTokenTTL.Seconds()))
-	if err != nil {
-		// скорее всего нужно логировать но не прерывать, так как токен может быть уже выдан
-
-	}
+	// Скорее всего сохранение нужно логировать
+	_ = saveJTItoMemcached(h.cache, jti, user.ID, int32(adminTokenTTL.Seconds()))
 	// Добавляем jti в список активных токенов пользователя ключ user_tokens:{userID} значение JSON-массив всех активных `jti`
 	err = addUserJTI(h.cache, user.ID, jti, int32(adminTokenTTL.Seconds()))
 	if err != nil {
@@ -225,7 +226,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	userID := claims["sub"].(string)
 
 	// Удаляем ключ auth:jti:{jti}
-	if err := h.cache.Delete("auth:jti:" + jti); err != nil && err != memcache.ErrCacheMiss {
+	if err := h.cache.Delete("auth:jti:" + jti); err != nil && !errors.Is(err, memcache.ErrCacheMiss) {
 		writeError(w, http.StatusInternalServerError, "failed to delete jti")
 		return
 	}
