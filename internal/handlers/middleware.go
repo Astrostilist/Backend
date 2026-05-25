@@ -40,7 +40,7 @@ func AdminAuthMiddleware(cache *memcache.Client, secretTokenAdmin string) func(h
 			}
 			// Проверяем наличие jti в Memcached
 			_, err = cache.Get("auth:jti:" + jti)
-			if err == memcache.ErrCacheMiss {
+			if errors.Is(err, memcache.ErrCacheMiss) {
 				writeError(w, http.StatusUnauthorized, "token expired or revoked")
 				return
 			}
