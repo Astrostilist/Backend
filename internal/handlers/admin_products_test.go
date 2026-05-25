@@ -10,9 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"astroapi/internal/admin"
 	"astroapi/internal/products"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeProductsRepository struct {
@@ -87,10 +91,25 @@ func (i *fakeProductCacheInvalidator) InvalidateProduct(_ context.Context, sku s
 	return nil
 }
 
-func newAdminProductsTestMux(repository products.Repository, invalidator products.CacheInvalidator) chi.Router {
+func newAdminProductsTestMux(t *testing.T, repository products.Repository, invalidator products.CacheInvalidator) (chi.Router, string) {
+	t.Helper()
+
+	cache := startMemcached(t)
+
+	jti := uuid.New().String()
+	token, err := GenerateAdminAccessToken("admin-id", "admin@test.com", admin.RoleSuperAdmin, testAdminToken, jti, time.Now())
+	require.NoError(t, err)
+
+	err = cache.Set(&memcache.Item{
+		Key:        "auth:jti:" + jti,
+		Value:      []byte("admin-id"),
+		Expiration: int32(adminTokenTTL.Seconds()),
+	})
+	require.NoError(t, err)
+
 	router := chi.NewRouter()
-	RegisterAdminProductsRoutes(router, testAdminToken, NewAdminProductsHandler(repository, invalidator))
-	return router
+	RegisterAdminProductsRoutes(router, testAdminToken, cache, NewAdminProductsHandler(repository, invalidator))
+	return router, token
 }
 
 func containsAllTags(productTags []string, filterTags []string) bool {
@@ -132,11 +151,12 @@ func TestListProductsFiltersByCategory(t *testing.T) {
 		},
 	})
 
+	mux, token := newAdminProductsTestMux(t, repository, nil)
+
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/products?category=rings&page=1&page_size=10", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
-	mux := newAdminProductsTestMux(repository, nil)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
@@ -173,12 +193,13 @@ func TestListProductsFiltersByCategory(t *testing.T) {
 func TestPatchProductUnknownSKUReturnsNotFound(t *testing.T) {
 	t.Parallel()
 
+	mux, token := newAdminProductsTestMux(t, newFakeProductsRepository(nil), nil)
+
 	payload := []byte(`{"tags":["new"]}`)
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/products/missing-sku", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
-	mux := newAdminProductsTestMux(newFakeProductsRepository(nil), nil)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusNotFound {
@@ -202,13 +223,13 @@ func TestPatchProductTagsInvalidatesCache(t *testing.T) {
 		},
 	})
 	invalidator := &fakeProductCacheInvalidator{}
+	mux, token := newAdminProductsTestMux(t, repository, invalidator)
 
 	payload := []byte(`{"tags":["new","summer"]}`)
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/products/sku-1", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
-	mux := newAdminProductsTestMux(repository, invalidator)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {

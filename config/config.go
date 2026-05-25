@@ -11,12 +11,12 @@ import (
 
 type Config struct {
 	// App
-	LogServiceName string
-	LogLevel       string
-	Environment    string
-	AdminToken     string
-	BotAPIKey      string
-	EncryptionKey  string
+	LogServiceName   string
+	LogLevel         string
+	Environment      string
+	SecretTokenAdmin string
+	BotAPIKey        string
+	EncryptionKey    string
 
 	MemcachedHost string
 
@@ -66,9 +66,9 @@ func Load() *Config {
 		JaegerEndpoint:    getEnv("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
 		JaegerServiceName: getEnv("JAEGER_SERVICE_NAME", "astro-backend"),
 
-		AdminToken:    getEnv("ADMIN_TOKEN", ""),
-		BotAPIKey:     getEnv("BOT_API_KEY", ""),
-		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
+		SecretTokenAdmin: getEnv("SECRET_TOKEN_ADMIN", ""),
+		BotAPIKey:        getEnv("BOT_API_KEY", ""),
+		EncryptionKey:    getEnv("ENCRYPTION_KEY", ""),
 
 		MemcachedHost: getEnv("MEMCACHED_HOST", "localhost:11211"),
 

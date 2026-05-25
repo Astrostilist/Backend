@@ -33,6 +33,7 @@ import (
 	"astroapi/internal/usecases"
 	"astroapi/internal/user"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nats-io/nats.go/jetstream"
@@ -63,8 +64,8 @@ func run() error {
 		return err
 	}
 
-	if cfg.AdminToken == "" {
-		log.Println("warning: ADMIN_TOKEN is not set, admin endpoints will reject all requests")
+	if cfg.SecretTokenAdmin == "" {
+		log.Println("warning: SECRET_TOKEN_ADMIN is not set, admin endpoints will reject all requests")
 	}
 
 	if cfg.BotAPIKey == "" {
@@ -75,6 +76,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
+	mc := memcache.New(cfg.MemcachedHost)
 
 	defer func() {
 		if syncErr := zapLogger.Sync(); syncErr != nil {
@@ -207,7 +210,7 @@ func run() error {
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil)
 	adminLogsHandler := handlers.NewAdminLogsHandler(adminLogsRepo)
-	authHandler := handlers.NewAuthHandler(adminRepo, cfg.AdminToken)
+	authHandler := handlers.NewAuthHandler(adminRepo, cfg.SecretTokenAdmin, mc)
 	feedbackHandler := handlers.NewFeedbackHandler(repositories.NewFeedbackRepository(db.DB))
 
 	dlqReader := natsinfra.NewDLQReader(jsAdapter, zapLogger)
@@ -233,12 +236,12 @@ func run() error {
 	r.Post("/api/v1/auth/login", authHandler.Login)
 	r.Post("/api/v1/admin/catalog/import", handlers.NewImportHandler(db))
 
-	handlers.RegisterAdminRulesRoutes(r, cfg.AdminToken, adminRulesHandler)
-	handlers.RegisterAdminProductsRoutes(r, cfg.AdminToken, adminProductsHandler)
-	handlers.RegisterAdminLogsRoutes(r, cfg.AdminToken, adminLogsHandler)
+	handlers.RegisterAdminRulesRoutes(r, cfg.SecretTokenAdmin, mc, adminRulesHandler)
+	handlers.RegisterAdminProductsRoutes(r, cfg.SecretTokenAdmin, mc, adminProductsHandler)
+	handlers.RegisterAdminLogsRoutes(r, cfg.SecretTokenAdmin, mc, adminLogsHandler)
 
 	r.Group(func(r chi.Router) {
-		r.Use(handlers.AdminAuthMiddleware(cfg.AdminToken))
+		r.Use(handlers.AdminAuthMiddleware(mc, cfg.SecretTokenAdmin))
 		r.Get("/api/v1/admin/dlq", dlqViewerHandler.ListMessages)
 	})
 
