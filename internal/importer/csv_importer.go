@@ -12,7 +12,9 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/lib/pq"
 	"go.uber.org/zap"
 )
 
@@ -31,8 +33,9 @@ func NewPostgresRepository(db *sql.DB, logger *zap.Logger) *PostgresRepository {
 
 // RunImportCSV - импорт файла .csv
 func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, r io.Reader) (*models.ImportResult, error) {
+
 	csvReader := csv.NewReader(r)
-	csvReader.FieldsPerRecord = 6
+	csvReader.FieldsPerRecord = 22
 	csvReader.ReuseRecord = true
 
 	if _, err := csvReader.Read(); err != nil {
@@ -41,8 +44,9 @@ func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, 
 	}
 
 	batchSize := 500
-	batch := make([]*models.Product, 0, batchSize)
-	result := &models.ImportResult{Errors: []string{}}
+	//	batch := make([]*models.Product, 0, batchSize)
+	batch := make([]*models.CatalogProduct, 0, batchSize)
+	result := &models.ImportResult{Errors: []models.ErrCatalog{}}
 
 	rowNum := 1
 
@@ -53,15 +57,15 @@ func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, 
 		}
 		if err != nil {
 			result.Skipped++
-			result.Errors = append(result.Errors, fmt.Sprintf("строка %d: %v", rowNum, err))
+			result.Errors = append(result.Errors, models.ErrCatalog{Row: rowNum, Reason: err.Error()})
 			rowNum++
 			continue
 		}
 
-		prod, err := parseAndValidate(record, rowNum)
+		prod, errCtl, err := parseAndValidateCatalog(record, rowNum)
 		if err != nil {
 			result.Skipped++
-			result.Errors = append(result.Errors, err.Error())
+			result.Errors = append(result.Errors, errCtl...)
 			rowNum++
 			continue
 		}
@@ -70,7 +74,14 @@ func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, 
 		rowNum++
 
 		if len(batch) == batchSize {
-			if err := flushBatch(ctx, m.db, batch); err != nil {
+			// инфо в лог
+			m.logger.Sugar().Infof("flushing batch count %d", batchSize)
+			start := time.Now()
+			defer func() {
+				m.logger.Sugar().Infof("batch flushed duration_ms %v", time.Since(start).Milliseconds())
+			}()
+
+			if err := flushBatchCatalog(ctx, m.db, batch); err != nil {
 				m.logger.Error("batch insert failed:", zap.Error(err))
 				return nil, err
 			}
@@ -79,8 +90,16 @@ func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, 
 		}
 	}
 
-	if len(batch) > 0 {
-		if err := flushBatch(ctx, m.db, batch); err != nil {
+	lenBatch := len(batch)
+	if lenBatch > 0 {
+		// инфо в лог
+		m.logger.Sugar().Infof("flushing batch count %d", lenBatch)
+		start := time.Now()
+		defer func() {
+			m.logger.Sugar().Infof("batch flushed duration_ms %v", time.Since(start).Milliseconds())
+		}()
+
+		if err := flushBatchCatalog(ctx, m.db, batch); err != nil {
 			m.logger.Error("final batch insert failed:", zap.Error(err))
 			return nil, err
 		}
@@ -117,6 +136,77 @@ func parseAndValidate(record []string, rowNum int) (*models.Product, error) {
 	}, nil
 }
 
+// parseAndValidateCatalog - валидация строки csv файла.
+// Появилась взамен parseAndValidate, работает с расширенной структурой CatalogProduct/
+func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduct, []models.ErrCatalog, error) {
+	errCtl := []models.ErrCatalog{}
+
+	// * - обяз-но, price == Базовая
+	price, err := strconv.ParseFloat(record[0], 64)
+	if err != nil || price <= 0 {
+		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Базовая> (price) должно быть > 0"})
+	}
+
+	// images = "Фото"
+	img := record[1]
+	images := strings.Split(img, ";")
+
+	// * - обяз-но, name = "Название"
+	name := record[2]
+	if name == "" {
+		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Наименование> обязательно"})
+	}
+
+	// article = "Артикл"
+	article := record[3]
+
+	// category = "Группа"
+	category := record[6]
+
+	// * - обяз-но, SKU ==  "XML ID"
+	sku := strings.TrimSpace(record[9])
+	if sku == "" {
+		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <XML ID> (SKU) обязательно"})
+	}
+
+	// * - обяз-но, ext_product_id = "Внешний ID"
+	ext_product_id := strings.TrimSpace(record[13])
+	if ext_product_id == "" {
+		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Внешний ID> обязательно"})
+	}
+
+	// * - обяз-но, url == Ссылка в магазине
+	url := record[18]
+	if url == "" {
+		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Ссылка в магазине> обязательно"})
+	}
+
+	// в зависимости от успеха валидации файла формируется return
+	if len(errCtl) == 0 {
+		return &models.CatalogProduct{
+			Article:        article,
+			Category:       category,
+			Ext_product_id: ext_product_id,
+			Images:         images,
+			Name:           name,
+			Price:          price,
+			SKU:            sku,
+			Url:            url,
+		}, errCtl, nil
+	} else {
+		return &models.CatalogProduct{
+			Article:        article,
+			Category:       category,
+			Ext_product_id: ext_product_id,
+			Images:         images,
+			Name:           name,
+			Price:          price,
+			SKU:            sku,
+			Url:            url,
+		}, errCtl, models.ErrValidateCatalog
+	}
+}
+
 func flushBatch(ctx context.Context, db *sql.DB, products []*models.Product) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -151,4 +241,56 @@ func flushBatch(ctx context.Context, db *sql.DB, products []*models.Product) err
 		}
 	}
 	return tx.Commit()
+}
+
+// flushBatchCatalog - добавляет распарсенные строки csv в БД.
+func flushBatchCatalog(ctx context.Context, db *sql.DB, products []*models.CatalogProduct) error {
+
+	var err error
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	stmt, err := tx.PrepareContext(ctx, `
+        INSERT INTO products (sku, ext_product_id, title, article, category, price, url, images)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (sku) DO UPDATE SET
+        ext_product_id = EXCLUDED.ext_product_id,    
+		title = EXCLUDED.title,
+		article = EXCLUDED.article,
+		category = EXCLUDED.category,
+        price = EXCLUDED.price,
+        url = EXCLUDED.url,
+		images = EXCLUDED.images,
+		updated_at = NOW()           
+    `)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer func() {
+		if closerErr := stmt.Close(); closerErr != nil && err == nil {
+			err = fmt.Errorf("failed to close statement: %w", closerErr)
+		}
+	}()
+
+	for _, p := range products {
+		// tagsJSON, _ := json.Marshal(p.Tags)
+		// if err != nil {
+		//     return fmt.Errorf("failed to marshal tags for product %s: %w", p.SKU, err)
+		// }
+		args := []any{p.SKU, p.Ext_product_id, p.Name, p.Article, p.Category, p.Price, p.Url, pq.Array(p.Images)}
+		if _, err = stmt.ExecContext(ctx, args...); err != nil {
+			return fmt.Errorf("failed to insert product %s: %w", p.SKU, err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	return nil
 }
