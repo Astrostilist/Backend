@@ -49,10 +49,10 @@ go run ./cmd/superadmin
 ```env
 SUPERADMIN_EMAIL=admin@example.com
 SUPERADMIN_PASSWORD=__CHANGEME_MIN_8_CHARS__
-ADMIN_TOKEN=__CHANGEME_ADMIN_TOKEN__
+SECRET_TOKEN_ADMIN=__CHANGEME_ADMIN_TOKEN__
 ```
 
-`ADMIN_TOKEN` используется как секрет для подписи access token и остается совместимым со старой схемой доступа к admin routes. Повторный запуск bootstrap-команды не создает дубликат SuperAdmin.
+`SECRET_TOKEN_ADMIN` используется как секрет для подписи access token и остается совместимым со старой схемой доступа к admin routes. Повторный запуск bootstrap-команды не создает дубликат SuperAdmin.
 
 После создания SuperAdmin можно пройти авторизацию через AUTH-01:
 

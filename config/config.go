@@ -12,12 +12,12 @@ import (
 
 type Config struct {
 	// App
-	LogServiceName string
-	LogLevel       string
-	Environment    string
-	AdminToken     string
-	BotAPIKey      string
-	EncryptionKey  string
+	LogServiceName   string
+	LogLevel         string
+	Environment      string
+	SecretTokenAdmin string
+	BotAPIKey        string
+	EncryptionKey    string
 
 	MemcachedHost string
 
@@ -78,9 +78,9 @@ func Load() *Config {
 		JaegerSamplingRate: getEnvAsFloat64("JAEGER_SAMPLING_RATE", 0.1),
 		JaegerSendTimeout:  getEnvAsDuration("JAEGER_SEND_TIMEOUT", 10*time.Second),
 
-		AdminToken:    getEnv("ADMIN_TOKEN", ""),
-		BotAPIKey:     getEnv("BOT_API_KEY", ""),
-		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
+		SecretTokenAdmin: getEnv("SECRET_TOKEN_ADMIN", ""),
+		BotAPIKey:        getEnv("BOT_API_KEY", ""),
+		EncryptionKey:    getEnv("ENCRYPTION_KEY", ""),
 
 		MemcachedHost: getEnv("MEMCACHED_HOST", "localhost:11211"),
 

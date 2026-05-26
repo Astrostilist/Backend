@@ -8,6 +8,7 @@ import (
 
 	"astroapi/internal/adminlogs"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -34,9 +35,9 @@ func NewAdminLogsHandler(repository adminlogs.Repository) *AdminLogsHandler {
 
 // RegisterAdminLogsRoutes регистрирует защищенные admin-роуты журнала генераций.
 // На вход принимает chi-роутер, admin token и handler; выходных значений нет.
-func RegisterAdminLogsRoutes(router chi.Router, adminToken string, handler *AdminLogsHandler) {
+func RegisterAdminLogsRoutes(router chi.Router, secretTokenAdmin string, cache *memcache.Client, handler *AdminLogsHandler) {
 	router.Route("/api/v1/admin/logs", func(router chi.Router) {
-		router.Use(AdminAuthMiddleware(adminToken))
+		router.Use(AdminAuthMiddleware(cache, secretTokenAdmin))
 		router.Get("/", handler.ListLogs)
 	})
 }

@@ -10,6 +10,7 @@ import (
 
 	"astroapi/internal/products"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
@@ -51,9 +52,9 @@ func NewAdminProductsHandler(repository products.Repository, cacheInvalidator pr
 	return &AdminProductsHandler{repository: repository, cacheInvalidator: cacheInvalidator, logger: logger}
 }
 
-func RegisterAdminProductsRoutes(router chi.Router, adminToken string, handler *AdminProductsHandler) {
+func RegisterAdminProductsRoutes(router chi.Router, secretTokenAdmin string, cache *memcache.Client, handler *AdminProductsHandler) {
 	router.Route("/api/v1/admin/products", func(router chi.Router) {
-		router.Use(AdminAuthMiddleware(adminToken))
+		router.Use(AdminAuthMiddleware(cache, secretTokenAdmin))
 		router.Get("/", handler.ListProducts)
 		router.Get("/{sku}", handler.GetProduct)
 		router.Patch("/{sku}", handler.PatchProduct)
