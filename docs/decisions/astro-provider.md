@@ -27,7 +27,7 @@ ASTRO_PROVIDER=external
 Это значение выбирает `internal/astro.ExternalAstroProvider`. Сейчас внутри этого адаптера используется FreeAstroAPI и endpoint:
 
 ```text
-POST /api/v2/vedic/chart
+POST /api/v1/natal/calculate
 ```
 
 Запрос отправляет дату и время рождения, координаты, `tz_str`, а также параметры `ayanamsha=lahiri`, `house_system=whole_sign` и `node_type=mean`.
