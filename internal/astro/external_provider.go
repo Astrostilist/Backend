@@ -1,6 +1,7 @@
 package astro
 
 import (
+	astrologger "astroapi/internal/infrastructure/logger"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,11 +11,13 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 const (
 	DefaultExternalAstroAPIBaseURL = "https://api.freeastroapi.com"
-	externalChartPath              = "/api/v2/vedic/chart"
+	externalChartPath              = "/api/v1/natal/calculate"
 	defaultHTTPTimeout             = 10 * time.Second
 )
 
@@ -51,22 +54,25 @@ func (p *ExternalAstroProvider) GetNatalChart(ctx context.Context, dob DateOfBir
 		return data, errors.New("ASTRO_API_KEY is not configured")
 	}
 	requestBody, err := json.Marshal(externalChartRequest{
-		Year:        dob.Year,
-		Month:       dob.Month,
-		Day:         dob.Day,
-		Hour:        dob.Hour,
-		Minute:      dob.Minute,
-		Latitude:    lat,
-		Longitude:   lon,
-		Timezone:    defaultTimezone(dob.Timezone),
-		Ayanamsha:   "lahiri",
-		HouseSystem: "whole_sign",
-		NodeType:    "mean",
+		Year:             dob.Year,
+		Month:            dob.Month,
+		Day:              dob.Day,
+		Hour:             dob.Hour,
+		Minute:           dob.Minute,
+		Latitude:         lat,
+		Longitude:        lon,
+		Timezone:         defaultTimezone(dob.Timezone),
+		HouseSystem:      "placidus",
+		ZodiacType:       "tropical",
+		IncludeDominants: true,
 	})
+
 	if err != nil {
 		return data, fmt.Errorf("encode external astro natal chart request: %w", err)
 	}
 	url := p.baseURL + externalChartPath
+	astrologger.Debug(ctx, "astroapi request", zap.String("req_url", url), zap.ByteString("request_body", requestBody))
+
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(requestBody))
 	if err != nil {
 		return data, fmt.Errorf("create external astro natal chart request: %w", err)
@@ -79,8 +85,8 @@ func (p *ExternalAstroProvider) GetNatalChart(ctx context.Context, dob DateOfBir
 		return data, fmt.Errorf("external astro natal chart request failed: %w", err)
 	}
 	defer func() {
-	    _ = response.Body.Close()
-    }()
+		_ = response.Body.Close()
+	}()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
@@ -93,6 +99,8 @@ func (p *ExternalAstroProvider) GetNatalChart(ctx context.Context, dob DateOfBir
 		}
 		return data, fmt.Errorf("external astro natal chart unavailable: status=%d body=%s", response.StatusCode, message)
 	}
+	astrologger.Debug(ctx, "astroapi response", zap.String("req_url", url), zap.ByteString("responce_body", body))
+
 	data, err = mapExternalAstroResponse(body)
 	if err != nil {
 		return data, err
@@ -101,17 +109,17 @@ func (p *ExternalAstroProvider) GetNatalChart(ctx context.Context, dob DateOfBir
 }
 
 type externalChartRequest struct {
-	Year        int     `json:"year"`
-	Month       int     `json:"month"`
-	Day         int     `json:"day"`
-	Hour        int     `json:"hour"`
-	Minute      int     `json:"minute"`
-	Latitude    float64 `json:"lat"`
-	Longitude   float64 `json:"lng"`
-	Timezone    string  `json:"tz_str"`
-	Ayanamsha   string  `json:"ayanamsha"`
-	HouseSystem string  `json:"house_system"`
-	NodeType    string  `json:"node_type"`
+	Year             int     `json:"year"`
+	Month            int     `json:"month"`
+	Day              int     `json:"day"`
+	Hour             int     `json:"hour"`
+	Minute           int     `json:"minute"`
+	Latitude         float64 `json:"lat"`
+	Longitude        float64 `json:"lng"`
+	Timezone         string  `json:"tz_str"`
+	HouseSystem      string  `json:"house_system"`
+	ZodiacType       string  `json:"zodiac_type"`
+	IncludeDominants bool    `json:"include_dominants"`
 }
 
 type externalChartResponse struct {
