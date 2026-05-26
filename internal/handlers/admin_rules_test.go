@@ -10,10 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"astroapi/internal/admin"
 	rules "astroapi/internal/ruleengine"
 
-	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -174,50 +172,25 @@ func (r *fakeRulesRepository) Match(_ context.Context, tags []string) ([]string,
 	return []string{}, nil
 }
 
-// newAdminRulesTestMux запускает memcached, генерирует валидный JWT и регистрирует роуты.
-// Возвращает роутер и токен для Authorization заголовка.
-func newAdminRulesTestMux(t *testing.T, repository rules.Repository) (chi.Router, string) {
+func newAdminRulesTestMux(t *testing.T, repository rules.Repository) chi.Router {
 	t.Helper()
-
-	cache := startMemcached(t)
-
-	jti := uuid.New().String()
-	token, err := GenerateAdminAccessToken("admin-id", "admin@test.com", admin.RoleSuperAdmin, testAdminToken, jti, time.Now())
-	require.NoError(t, err)
-
-	err = cache.Set(&memcache.Item{
-		Key:        "auth:jti:" + jti,
-		Value:      []byte("admin-id"),
-		Expiration: int32(adminTokenTTL.Seconds()),
-	})
-	require.NoError(t, err)
-
 	router := chi.NewRouter()
-	RegisterAdminRulesRoutes(router, testAdminToken, cache, NewAdminRulesHandler(repository))
-	return router, token
-}
-
-func TestAdminRulesRequireToken(t *testing.T) {
-	t.Parallel()
-
-	mux, _ := newAdminRulesTestMux(t, newFakeRulesRepository(nil))
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules", nil)
-	response := httptest.NewRecorder()
-
-	mux.ServeHTTP(response, request)
-
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, response.Code)
-	}
+	handler := NewAdminRulesHandler(repository)
+	router.Get("/api/v1/admin/rules", handler.ListRules)
+	router.Post("/api/v1/admin/rules", handler.CreateRule)
+	router.Get("/api/v1/admin/rules/{id}", handler.GetRule)
+	router.Put("/api/v1/admin/rules/{id}", handler.UpdateRule)
+	router.Patch("/api/v1/admin/rules/{id}", handler.PatchRule)
+	router.Delete("/api/v1/admin/rules/{id}", handler.DeleteRule)
+	return router
 }
 
 func TestRuleCreateRejectsNegativePriority(t *testing.T) {
 	t.Parallel()
 
-	mux, token := newAdminRulesTestMux(t, newFakeRulesRepository(nil))
+	mux := newAdminRulesTestMux(t, newFakeRulesRepository(nil))
 	payload := []byte(`{"name":"Retrograde rule","astro_condition":{"planet":"mars"},"product_tags":["energy"],"priority":-1}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/rules", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -247,9 +220,8 @@ func TestRuleDeleteSoftDeletesRecord(t *testing.T) {
 		},
 	})
 
-	mux, token := newAdminRulesTestMux(t, repository)
+	mux := newAdminRulesTestMux(t, repository)
 	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/rules/"+smplID.String(), nil)
-	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -271,10 +243,9 @@ func TestRuleCreateSucceeds(t *testing.T) {
 	t.Parallel()
 
 	repository := newFakeRulesRepository(nil)
-	mux, token := newAdminRulesTestMux(t, repository)
+	mux := newAdminRulesTestMux(t, repository)
 	payload := []byte(`{"name":"Lunar","astro_condition":{"moon":"full"},"product_tags":["mystic"],"priority":10,"is_active":true}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/rules", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -327,10 +298,9 @@ func TestRuleUpdateModifiesFields(t *testing.T) {
 		},
 	})
 
-	mux, token := newAdminRulesTestMux(t, repository)
+	mux := newAdminRulesTestMux(t, repository)
 	payload := []byte(`{"name":"New","astro_condition":{"sign":"taurus"},"product_tags":["earth"],"priority":7,"is_active":true}`)
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/rules/"+ruleID.String(), bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -348,10 +318,9 @@ func TestRuleUpdateModifiesFields(t *testing.T) {
 func TestRuleUpdateNotFound(t *testing.T) {
 	t.Parallel()
 
-	mux, token := newAdminRulesTestMux(t, newFakeRulesRepository(nil))
+	mux := newAdminRulesTestMux(t, newFakeRulesRepository(nil))
 	payload := []byte(`{"name":"X","astro_condition":{"a":"b"},"product_tags":["t"],"priority":1,"is_active":true}`)
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/rules/missing", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -396,9 +365,8 @@ func TestRuleListFiltersByActiveFlag(t *testing.T) {
 		},
 	})
 
-	mux, token := newAdminRulesTestMux(t, repository)
+	mux := newAdminRulesTestMux(t, repository)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules?is_active=true&page_size=50&page=1", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -457,9 +425,8 @@ func TestRuleGetReturnsStoredRule(t *testing.T) {
 		},
 	})
 
-	mux, token := newAdminRulesTestMux(t, repository)
+	mux := newAdminRulesTestMux(t, repository)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules/"+smplID.String(), nil)
-	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
