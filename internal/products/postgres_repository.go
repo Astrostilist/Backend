@@ -1,16 +1,20 @@
 package products
 
 import (
+	"astroapi/internal/models"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+
+	"github.com/lib/pq"
+	"go.uber.org/zap"
 )
 
 type PostgresRepository struct {
-	db *sql.DB
+	db     *sql.DB
+	logger *zap.Logger
 }
 
 type rowScanner interface {
@@ -22,45 +26,37 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 }
 
 func (r *PostgresRepository) List(ctx context.Context, options ListOptions) (ListResult, error) {
+	totalCount := 0
+	query := `
+	SELECT COUNT(*) OVER(), sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at
+	FROM  products
+	WHERE ($1 = '' OR category = $1) AND ($2::jsonb IS NULL OR tags @> $2::jsonb)
+	ORDER BY created_at DESC
+	LIMIT $3 OFFSET $4`
+
 	tagsFilter, err := buildTagsFilterArg(options.Tags)
 	if err != nil {
 		return ListResult{}, err
 	}
-
-	countQuery := `
-		SELECT COUNT(*)
-		FROM products
-		WHERE ($1 = '' OR category = $1)
-		  AND ($2::jsonb IS NULL OR tags @> $2::jsonb)
-	`
-
-	var totalCount int
-	if err := r.db.QueryRowContext(ctx, countQuery, options.Category, tagsFilter).Scan(&totalCount); err != nil {
-		return ListResult{}, fmt.Errorf("count products: %w", err)
-	}
-
-	query := `
-		SELECT ext_product_id, title, price, tags, category, created_at, updated_at
-		FROM products
-		WHERE ($1 = '' OR category = $1)
-		  AND ($2::jsonb IS NULL OR tags @> $2::jsonb)
-		ORDER BY created_at DESC
-		LIMIT $3 OFFSET $4
-	`
-
-	rows, err := r.db.QueryContext(ctx, query, options.Category, tagsFilter, options.Limit, options.Offset)
+	//args := []any{options.limit(), options.offset(), *options.IsActive}
+	args := []any{options.Category, tagsFilter, options.Limit, options.Offset}
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
+		//return nil, Metadata{}, err
 		return ListResult{}, fmt.Errorf("list products: %w", err)
 	}
 	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("failed to close products rows: %v", closeErr)
+		err = rows.Close()
+		if err != nil {
+			r.logger.Error("failed to rows close", zap.Error(err))
 		}
 	}()
 
-	items := make([]Product, 0)
+	items := make([]models.CatalogProduct, 0)
 	for rows.Next() {
-		item, scanErr := scanProduct(rows)
+		item := models.CatalogProduct{}
+		var scanErr error
+		item, totalCount, scanErr = scanProduct(rows, true)
 		if scanErr != nil {
 			return ListResult{}, scanErr
 		}
@@ -73,26 +69,26 @@ func (r *PostgresRepository) List(ctx context.Context, options ListOptions) (Lis
 	return ListResult{Items: items, TotalCount: totalCount}, nil
 }
 
-func (r *PostgresRepository) GetBySKU(ctx context.Context, sku string) (Product, error) {
+func (r *PostgresRepository) GetBySKU(ctx context.Context, sku string) (models.CatalogProduct, error) {
 	query := `
-		SELECT ext_product_id, title, price, tags, category, created_at, updated_at
+		SELECT sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at
 		FROM products
-		WHERE ext_product_id = $1
+		WHERE sku = $1
 	`
 
 	row := r.db.QueryRowContext(ctx, query, sku)
 
-	productItem, err := scanProduct(row)
+	productItem, _, err := scanProduct(row, false)
 	if err != nil {
-		return Product{}, err
+		return models.CatalogProduct{}, err
 	}
 
 	return productItem, nil
 }
 
-func (r *PostgresRepository) Patch(ctx context.Context, sku string, input PatchInput) (Product, error) {
+func (r *PostgresRepository) Patch(ctx context.Context, sku string, input PatchInput) (models.CatalogProduct, error) {
 	if input.Price == nil && input.Tags == nil {
-		return Product{}, errors.New("no product fields to update")
+		return models.CatalogProduct{}, errors.New("no product fields to update")
 	}
 
 	var (
@@ -110,8 +106,8 @@ func (r *PostgresRepository) Patch(ctx context.Context, sku string, input PatchI
 				SET price = $2,
 				    tags = $3::jsonb,
 				    updated_at = CURRENT_TIMESTAMP
-				WHERE ext_product_id = $1
-				RETURNING ext_product_id, title, price, tags, category, created_at, updated_at
+				WHERE sku = $1
+				RETURNING sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at
 			`
 			row = r.db.QueryRowContext(ctx, query, sku, *input.Price, tagsJSON)
 		}
@@ -120,8 +116,8 @@ func (r *PostgresRepository) Patch(ctx context.Context, sku string, input PatchI
 			UPDATE products
 			SET price = $2,
 			    updated_at = CURRENT_TIMESTAMP
-			WHERE ext_product_id = $1
-			RETURNING ext_product_id, title, price, tags, category, created_at, updated_at
+			WHERE sku = $1
+			RETURNING sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at
 		`
 		row = r.db.QueryRowContext(ctx, query, sku, *input.Price)
 	case input.Tags != nil:
@@ -132,19 +128,19 @@ func (r *PostgresRepository) Patch(ctx context.Context, sku string, input PatchI
 				UPDATE products
 				SET tags = $2::jsonb,
 				    updated_at = CURRENT_TIMESTAMP
-				WHERE ext_product_id = $1
-				RETURNING ext_product_id, title, price, tags, category, created_at, updated_at
+				WHERE sku = $1
+				RETURNING sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at
 			`
 			row = r.db.QueryRowContext(ctx, query, sku, tagsJSON)
 		}
 	}
 	if err != nil {
-		return Product{}, err
+		return models.CatalogProduct{}, err
 	}
 
-	productItem, err := scanProduct(row)
+	productItem, _, err := scanProduct(row, false)
 	if err != nil {
-		return Product{}, err
+		return models.CatalogProduct{}, err
 	}
 
 	return productItem, nil
@@ -167,31 +163,67 @@ func marshalProductTags(tags []string) (string, error) {
 	return string(tagsJSON), nil
 }
 
-func scanProduct(scanner rowScanner) (Product, error) {
-	productItem := Product{}
-	var tagsJSON []byte
+func scanProduct(scanner rowScanner, withCount bool) (models.CatalogProduct, int, error) {
+	productItem := models.CatalogProduct{}
+	var (
+		tagsJSON   []byte
+		urlImgs    pq.StringArray
+		totalCount int
+		err        error
+	)
+	// sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at
 
-	if err := scanner.Scan(
-		&productItem.SKU,
-		&productItem.Name,
-		&productItem.Price,
-		&tagsJSON,
-		&productItem.Category,
-		&productItem.CreatedAt,
-		&productItem.UpdatedAt,
-	); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Product{}, ErrProductNotFound
+	if withCount {
+		err = scanner.Scan(
+			&totalCount,
+			&productItem.SKU,
+			&productItem.Ext_product_id,
+			&productItem.Name,
+			&productItem.Price,
+			&productItem.Article,
+			&tagsJSON,
+			&productItem.Category,
+			&productItem.Url,
+			&urlImgs,
+			&productItem.Rating,
+			&productItem.CreatedAt,
+			&productItem.UpdatedAt,
+		)
+	} else {
+		err = scanner.Scan(
+			&productItem.SKU,
+			&productItem.Ext_product_id,
+			&productItem.Name,
+			&productItem.Price,
+			&productItem.Article,
+			&tagsJSON,
+			&productItem.Category,
+			&productItem.Url,
+			&urlImgs,
+			&productItem.Rating,
+			&productItem.CreatedAt,
+			&productItem.UpdatedAt,
+		)
+		if err != nil {
+			totalCount = 1
 		}
-		return Product{}, fmt.Errorf("scan product: %w", err)
+	}
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.CatalogProduct{}, 0, ErrProductNotFound
+		}
+		return models.CatalogProduct{}, 0, fmt.Errorf("scan product: %w", err)
 	}
 
 	if err := json.Unmarshal(tagsJSON, &productItem.Tags); err != nil {
-		return Product{}, fmt.Errorf("decode product tags: %w", err)
+		return models.CatalogProduct{}, 0, fmt.Errorf("decode product tags: %w", err)
 	}
 	if productItem.Tags == nil {
 		productItem.Tags = []string{}
 	}
 
-	return productItem, nil
+	productItem.Images = []string(urlImgs)
+
+	return productItem, totalCount, nil
 }

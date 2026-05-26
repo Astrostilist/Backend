@@ -35,7 +35,6 @@ func (h *AdminImportHandler) StartImport(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// ???
 	defer func() {
 		if cerr := file.Close(); cerr != nil {
 			writeError(w, http.StatusInternalServerError, "failed to close file: "+err.Error())
@@ -52,7 +51,7 @@ func (h *AdminImportHandler) StartImport(w http.ResponseWriter, r *http.Request)
 
 	writeJSON(w, http.StatusOK, Response{
 		Message: "catalog parsed successfully",
-		Data:    map[string]any{"result": result}, // ??? TODO
+		Data:    map[string]any{"result": result},
 	})
 
 }

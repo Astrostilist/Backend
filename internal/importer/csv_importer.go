@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/csv"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -69,6 +68,7 @@ func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, 
 			rowNum++
 			continue
 		}
+		fmt.Println("*****prod ", prod)
 
 		batch = append(batch, prod)
 		rowNum++
@@ -109,6 +109,7 @@ func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, 
 	return result, nil
 }
 
+/*
 func parseAndValidate(record []string, rowNum int) (*models.Product, error) {
 	sku := strings.TrimSpace(record[0])
 	if sku == "" {
@@ -135,7 +136,7 @@ func parseAndValidate(record []string, rowNum int) (*models.Product, error) {
 		Price: price, Tags: tags, Category: category,
 	}, nil
 }
-
+*/
 // parseAndValidateCatalog - валидация строки csv файла.
 // Появилась взамен parseAndValidate, работает с расширенной структурой CatalogProduct/
 func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduct, []models.ErrCatalog, error) {
@@ -146,40 +147,47 @@ func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduc
 	if err != nil || price <= 0 {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Базовая> (price) должно быть > 0"})
 	}
+	fmt.Println("***price =", price)
 
 	// images = "Фото"
 	img := record[1]
 	images := strings.Split(img, ";")
+	fmt.Println("***images =", images)
 
 	// * - обяз-но, name = "Название"
 	name := record[2]
 	if name == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Наименование> обязательно"})
 	}
+	fmt.Println("***name =", name)
 
 	// article = "Артикл"
 	article := record[3]
+	fmt.Println("***article =", article)
 
 	// category = "Группа"
 	category := record[6]
-
+	fmt.Println("***category =", category)
 	// * - обяз-но, SKU ==  "XML ID"
 	sku := strings.TrimSpace(record[9])
 	if sku == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <XML ID> (SKU) обязательно"})
 	}
+	fmt.Println("***sku =", sku)
 
 	// * - обяз-но, ext_product_id = "Внешний ID"
 	ext_product_id := strings.TrimSpace(record[13])
 	if ext_product_id == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Внешний ID> обязательно"})
 	}
+	fmt.Println("***ext_product_id =", ext_product_id)
 
 	// * - обяз-но, url == Ссылка в магазине
 	url := record[18]
 	if url == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Ссылка в магазине> обязательно"})
 	}
+	fmt.Println("***url =", url)
 
 	// в зависимости от успеха валидации файла формируется return
 	if len(errCtl) == 0 {
@@ -207,6 +215,7 @@ func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduc
 	}
 }
 
+/*
 func flushBatch(ctx context.Context, db *sql.DB, products []*models.Product) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -242,10 +251,9 @@ func flushBatch(ctx context.Context, db *sql.DB, products []*models.Product) err
 	}
 	return tx.Commit()
 }
-
+*/
 // flushBatchCatalog - добавляет распарсенные строки csv в БД.
 func flushBatchCatalog(ctx context.Context, db *sql.DB, products []*models.CatalogProduct) error {
-
 	var err error
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -261,36 +269,56 @@ func flushBatchCatalog(ctx context.Context, db *sql.DB, products []*models.Catal
         INSERT INTO products (sku, ext_product_id, title, article, category, price, url, images)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (sku) DO UPDATE SET
-        ext_product_id = EXCLUDED.ext_product_id,    
-		title = EXCLUDED.title,
-		article = EXCLUDED.article,
-		category = EXCLUDED.category,
-        price = EXCLUDED.price,
-        url = EXCLUDED.url,
-		images = EXCLUDED.images,
-		updated_at = NOW()           
+            ext_product_id = EXCLUDED.ext_product_id,    
+            title = EXCLUDED.title,
+            article = EXCLUDED.article,
+            category = EXCLUDED.category,
+            price = EXCLUDED.price,
+            url = EXCLUDED.url,
+            images = EXCLUDED.images,
+            updated_at = NOW()           
     `)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
+	fmt.Println("***")
 	defer func() {
 		if closerErr := stmt.Close(); closerErr != nil && err == nil {
 			err = fmt.Errorf("failed to close statement: %w", closerErr)
 		}
 	}()
 
-	for _, p := range products {
-		// tagsJSON, _ := json.Marshal(p.Tags)
-		// if err != nil {
-		//     return fmt.Errorf("failed to marshal tags for product %s: %w", p.SKU, err)
-		// }
-		args := []any{p.SKU, p.Ext_product_id, p.Name, p.Article, p.Category, p.Price, p.Url, pq.Array(p.Images)}
+	for i, p := range products {
+		// Валидация обязательных полей
+		if p.SKU == "" {
+			return fmt.Errorf("product at index %d has empty SKU", i)
+		}
+		if p.Ext_product_id == "" {
+			return fmt.Errorf("product %s has empty ext_product_id", p.SKU)
+		}
+		if p.Name == "" {
+			return fmt.Errorf("product %s has empty title", p.SKU)
+		}
+
+		args := []any{
+			p.SKU,
+			p.Ext_product_id,
+			p.Name,
+			p.Article,
+			p.Category,
+			p.Price,
+			p.Url,
+			pq.Array(p.Images),
+		}
+
 		if _, err = stmt.ExecContext(ctx, args...); err != nil {
 			return fmt.Errorf("failed to insert product %s: %w", p.SKU, err)
 		}
 	}
+
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+
 	return nil
 }

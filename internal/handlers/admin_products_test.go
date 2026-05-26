@@ -10,17 +10,18 @@ import (
 	"testing"
 	"time"
 
+	"astroapi/internal/models"
 	"astroapi/internal/products"
 
 	"github.com/go-chi/chi/v5"
 )
 
 type fakeProductsRepository struct {
-	items map[string]products.Product
+	items map[string]models.CatalogProduct
 }
 
-func newFakeProductsRepository(items []products.Product) *fakeProductsRepository {
-	repository := &fakeProductsRepository{items: make(map[string]products.Product, len(items))}
+func newFakeProductsRepository(items []models.CatalogProduct) *fakeProductsRepository {
+	repository := &fakeProductsRepository{items: make(map[string]models.CatalogProduct, len(items))}
 	for _, item := range items {
 		repository.items[item.SKU] = item
 	}
@@ -28,7 +29,7 @@ func newFakeProductsRepository(items []products.Product) *fakeProductsRepository
 }
 
 func (r *fakeProductsRepository) List(_ context.Context, options products.ListOptions) (products.ListResult, error) {
-	filtered := make([]products.Product, 0, len(r.items))
+	filtered := make([]models.CatalogProduct, 0, len(r.items))
 	for _, item := range r.items {
 		if options.Category != "" && item.Category != options.Category {
 			continue
@@ -52,18 +53,18 @@ func (r *fakeProductsRepository) List(_ context.Context, options products.ListOp
 	}, nil
 }
 
-func (r *fakeProductsRepository) GetBySKU(_ context.Context, sku string) (products.Product, error) {
+func (r *fakeProductsRepository) GetBySKU(_ context.Context, sku string) (models.CatalogProduct, error) {
 	productItem, ok := r.items[sku]
 	if !ok {
-		return products.Product{}, products.ErrProductNotFound
+		return models.CatalogProduct{}, products.ErrProductNotFound
 	}
 	return productItem, nil
 }
 
-func (r *fakeProductsRepository) Patch(_ context.Context, sku string, input products.PatchInput) (products.Product, error) {
+func (r *fakeProductsRepository) Patch(_ context.Context, sku string, input products.PatchInput) (models.CatalogProduct, error) {
 	productItem, ok := r.items[sku]
 	if !ok {
-		return products.Product{}, products.ErrProductNotFound
+		return models.CatalogProduct{}, products.ErrProductNotFound
 	}
 
 	if input.Price != nil {
@@ -111,24 +112,32 @@ func TestListProductsFiltersByCategory(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC()
-	repository := newFakeProductsRepository([]products.Product{
+	repository := newFakeProductsRepository([]models.CatalogProduct{
 		{
-			SKU:       "sku-1",
-			Name:      "Silk scarf",
-			Price:     1200,
-			Tags:      []string{"silk"},
-			Category:  "scarves",
-			CreatedAt: now,
-			UpdatedAt: now,
+			SKU:            "sku-1",
+			Ext_product_id: "1",
+			Name:           "Silk scarf",
+			Price:          1200,
+			Tags:           []string{"silk"},
+			Category:       "scarves",
+			Images:         []string{"https:://img1.jpg"},
+			Url:            "https:://ex1.com",
+			Article:        "bz/black",
+			CreatedAt:      now,
+			UpdatedAt:      now,
 		},
 		{
-			SKU:       "sku-2",
-			Name:      "Silver ring",
-			Price:     2500,
-			Tags:      []string{"silver"},
-			Category:  "rings",
-			CreatedAt: now,
-			UpdatedAt: now,
+			SKU:            "sku-2",
+			Ext_product_id: "2",
+			Name:           "Silver ring",
+			Price:          2500,
+			Tags:           []string{"silver"},
+			Category:       "rings",
+			Images:         []string{"https:://img2.jpg"},
+			Url:            "https:://ex2.com",
+			Article:        "bz/silver",
+			CreatedAt:      now,
+			UpdatedAt:      now,
 		},
 	})
 
@@ -190,15 +199,19 @@ func TestPatchProductTagsInvalidatesCache(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC()
-	repository := newFakeProductsRepository([]products.Product{
+	repository := newFakeProductsRepository([]models.CatalogProduct{
 		{
-			SKU:       "sku-1",
-			Name:      "Silk scarf",
-			Price:     1200,
-			Tags:      []string{"old"},
-			Category:  "scarves",
-			CreatedAt: now,
-			UpdatedAt: now,
+			SKU:            "sku-1",
+			Ext_product_id: "pr2",
+			Name:           "Silk scarf",
+			Price:          1200,
+			Tags:           []string{"old"},
+			Category:       "scarves",
+			Images:         []string{"https:://img1.jpg"},
+			Url:            "https:://ex1.com",
+			Article:        "bz/scarves",
+			CreatedAt:      now,
+			UpdatedAt:      now,
 		},
 	})
 	invalidator := &fakeProductCacheInvalidator{}

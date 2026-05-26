@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"astroapi/internal/models"
 	"astroapi/internal/products"
 
 	"github.com/go-chi/chi/v5"
@@ -25,8 +26,8 @@ type AdminProductsHandler struct {
 }
 
 type adminProductsListResponse struct {
-	Items    []products.Product `json:"items"`
-	Metadata paginationMetadata `json:"metadata"`
+	Items    []models.CatalogProduct `json:"items"`
+	Metadata paginationMetadata      `json:"metadata"`
 }
 
 type paginationMetadata struct {
@@ -62,7 +63,7 @@ func (h *AdminProductsHandler) ListProducts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	result, err := h.repository.List(r.Context(), options)
+	result, err := h.repository.List(r.Context(), options) // TODO
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch products")
 		return
@@ -71,7 +72,7 @@ func (h *AdminProductsHandler) ListProducts(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Products fetched successfully",
 		Data: adminProductsListResponse{
-			Items:    result.Items,
+			Items:    result.Items, // TODO
 			Metadata: buildPaginationMetadata(page, pageSize, result.TotalCount),
 		},
 	})
@@ -84,7 +85,7 @@ func (h *AdminProductsHandler) GetProduct(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	productItem, err := h.repository.GetBySKU(r.Context(), sku)
+	productItem, err := h.repository.GetBySKU(r.Context(), sku) // TODO
 	if err != nil {
 		if errors.Is(err, products.ErrProductNotFound) {
 			writeError(w, http.StatusNotFound, "product not found")
@@ -96,7 +97,7 @@ func (h *AdminProductsHandler) GetProduct(w http.ResponseWriter, r *http.Request
 
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Product fetched successfully",
-		Data:    productItem,
+		Data:    productItem, // TODO
 	})
 }
 
@@ -107,19 +108,19 @@ func (h *AdminProductsHandler) PatchProduct(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	payload, err := decodeProductPatchRequest(r)
+	payload, err := decodeProductPatchRequest(r) // TODO
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	input, tagsChanged, err := payload.toPatchInput()
+	input, tagsChanged, err := payload.toPatchInput() // TODO
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
-	updatedProduct, err := h.repository.Patch(r.Context(), sku, input)
+	updatedProduct, err := h.repository.Patch(r.Context(), sku, input) // TODO
 	if err != nil {
 		if errors.Is(err, products.ErrProductNotFound) {
 			writeError(w, http.StatusNotFound, "product not found")
@@ -138,7 +139,7 @@ func (h *AdminProductsHandler) PatchProduct(w http.ResponseWriter, r *http.Reque
 
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Product updated successfully",
-		Data:    updatedProduct,
+		Data:    updatedProduct, // TODO
 	})
 }
 
@@ -188,6 +189,7 @@ func (r adminProductPatchRequest) toPatchInput() (products.PatchInput, bool, err
 	return input, tagsChanged, nil
 }
 
+// parseProductsListOptions - парсинг query-параметров.
 func parseProductsListOptions(r *http.Request) (products.ListOptions, int, int, error) {
 	query := r.URL.Query()
 

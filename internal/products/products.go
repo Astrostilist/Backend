@@ -2,22 +2,22 @@
 package products
 
 import (
+	"astroapi/internal/models"
 	"context"
 	"errors"
-	"time"
 )
 
 var ErrProductNotFound = errors.New("product not found")
 
-type Product struct {
-	SKU       string    `json:"sku"`
-	Name      string    `json:"name"`
-	Price     float64   `json:"price"`
-	Tags      []string  `json:"tags"`
-	Category  string    `json:"category"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
+// type Product struct {
+// 	SKU       string    `json:"sku"`
+// 	Name      string    `json:"name"`
+// 	Price     float64   `json:"price"`
+// 	Tags      []string  `json:"tags"`
+// 	Category  string    `json:"category"`
+// 	CreatedAt time.Time `json:"created_at"`
+// 	UpdatedAt time.Time `json:"updated_at"`
+// }
 
 type ListOptions struct {
 	Category string
@@ -27,7 +27,7 @@ type ListOptions struct {
 }
 
 type ListResult struct {
-	Items      []Product
+	Items      []models.CatalogProduct
 	TotalCount int
 }
 
@@ -42,6 +42,6 @@ type CacheInvalidator interface {
 
 type Repository interface {
 	List(ctx context.Context, options ListOptions) (ListResult, error)
-	GetBySKU(ctx context.Context, sku string) (Product, error)
-	Patch(ctx context.Context, sku string, input PatchInput) (Product, error)
+	GetBySKU(ctx context.Context, sku string) (models.CatalogProduct, error)
+	Patch(ctx context.Context, sku string, input PatchInput) (models.CatalogProduct, error)
 }
