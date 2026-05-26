@@ -71,7 +71,7 @@ func (p *ExternalAstroProvider) GetNatalChart(ctx context.Context, dob DateOfBir
 		return data, fmt.Errorf("encode external astro natal chart request: %w", err)
 	}
 	url := p.baseURL + externalChartPath
-	astrologger.Debug(ctx, "astroapi request", zap.String("req_url", url), zap.ByteString("request_body", requestBody))
+	astrologger.Debug(ctx, "astroapi request", zap.String("url", url), zap.ByteString("request_body", requestBody))
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(requestBody))
 	if err != nil {
@@ -99,7 +99,7 @@ func (p *ExternalAstroProvider) GetNatalChart(ctx context.Context, dob DateOfBir
 		}
 		return data, fmt.Errorf("external astro natal chart unavailable: status=%d body=%s", response.StatusCode, message)
 	}
-	astrologger.Debug(ctx, "astroapi response", zap.String("req_url", url), zap.ByteString("responce_body", body))
+	astrologger.Debug(ctx, "astroapi response", zap.String("url", url), zap.ByteString("response_body", body))
 
 	data, err = mapExternalAstroResponse(body)
 	if err != nil {
