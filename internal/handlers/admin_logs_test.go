@@ -9,17 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"astroapi/internal/admin"
 	"astroapi/internal/adminlogs"
 	"astroapi/internal/requests"
 
-	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/require"
 )
-
-const testAdminToken = "test-admin-token" // TPDO: убрать после починки логов admin_rules
 
 type fakeAdminLogsRepository struct {
 	items       []adminlogs.LogEntry
@@ -49,27 +43,14 @@ func (r *fakeAdminLogsRepository) List(_ context.Context, options adminlogs.List
 	return adminlogs.ListResult{Items: filtered, TotalCount: totalCount}, nil
 }
 
-// newAdminLogsTestMux создает chi-роутер для тестов admin logs.
+// newAdminLogsTestMux создает chi-роутер для тестов admin logs без auth middleware.
 // На вход принимает репозиторий, на выход возвращает настроенный роутер.
-func newAdminLogsTestMux(t *testing.T, repository adminlogs.Repository) (chi.Router, string) {
+func newAdminLogsTestMux(t *testing.T, repository adminlogs.Repository) chi.Router {
 	t.Helper()
-
-	cache := startMemcached(t)
-
-	jti := uuid.New().String()
-	token, err := GenerateAdminAccessToken("admin-id", "admin@test.com", admin.RoleSuperAdmin, testAdminToken, jti, time.Now())
-	require.NoError(t, err)
-
-	err = cache.Set(&memcache.Item{
-		Key:        "auth:jti:" + jti,
-		Value:      []byte("admin-id"),
-		Expiration: int32(adminTokenTTL.Seconds()),
-	})
-	require.NoError(t, err)
-
 	router := chi.NewRouter()
-	RegisterAdminLogsRoutes(router, testAdminToken, cache, NewAdminLogsHandler(repository))
-	return router, token
+	handler := NewAdminLogsHandler(repository)
+	router.Get("/api/v1/admin/logs", handler.ListLogs)
+	return router
 }
 
 // decodeAdminLogsData декодирует data из JSON-ответа admin logs.
@@ -101,10 +82,9 @@ func TestListAdminLogsFiltersByFailedStatus(t *testing.T) {
 		{RequestID: "req-2", UserID: "user-2", Status: requests.StatusCompleted, CreatedAt: now},
 	}}
 
-	mux, token := newAdminLogsTestMux(t, repository)
+	mux := newAdminLogsTestMux(t, repository)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs?status=failed", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -140,10 +120,9 @@ func TestListAdminLogsRejectsLimitOverMax(t *testing.T) {
 	t.Parallel()
 
 	repository := &fakeAdminLogsRepository{}
-	mux, token := newAdminLogsTestMux(t, repository)
+	mux := newAdminLogsTestMux(t, repository)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs?limit=201", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
@@ -170,10 +149,9 @@ func TestListAdminLogsTruncatesErrorMessage(t *testing.T) {
 			CreatedAt:    time.Now().UTC(),
 		},
 	}}
-	mux, token := newAdminLogsTestMux(t, repository)
+	mux := newAdminLogsTestMux(t, repository)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, request)
