@@ -68,7 +68,6 @@ func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, 
 			rowNum++
 			continue
 		}
-		fmt.Println("*****prod ", prod)
 
 		batch = append(batch, prod)
 		rowNum++
@@ -147,47 +146,39 @@ func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduc
 	if err != nil || price <= 0 {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Базовая> (price) должно быть > 0"})
 	}
-	fmt.Println("***price =", price)
 
 	// images = "Фото"
 	img := record[1]
 	images := strings.Split(img, ";")
-	fmt.Println("***images =", images)
 
 	// * - обяз-но, name = "Название"
 	name := record[2]
 	if name == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Наименование> обязательно"})
 	}
-	fmt.Println("***name =", name)
 
 	// article = "Артикл"
 	article := record[3]
-	fmt.Println("***article =", article)
 
 	// category = "Группа"
 	category := record[6]
-	fmt.Println("***category =", category)
 	// * - обяз-но, SKU ==  "XML ID"
 	sku := strings.TrimSpace(record[9])
 	if sku == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <XML ID> (SKU) обязательно"})
 	}
-	fmt.Println("***sku =", sku)
 
 	// * - обяз-но, ext_product_id = "Внешний ID"
 	ext_product_id := strings.TrimSpace(record[13])
 	if ext_product_id == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Внешний ID> обязательно"})
 	}
-	fmt.Println("***ext_product_id =", ext_product_id)
 
 	// * - обяз-но, url == Ссылка в магазине
 	url := record[18]
 	if url == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Ссылка в магазине> обязательно"})
 	}
-	fmt.Println("***url =", url)
 
 	// в зависимости от успеха валидации файла формируется return
 	if len(errCtl) == 0 {
@@ -281,7 +272,6 @@ func flushBatchCatalog(ctx context.Context, db *sql.DB, products []*models.Catal
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
-	fmt.Println("***")
 	defer func() {
 		if closerErr := stmt.Close(); closerErr != nil && err == nil {
 			err = fmt.Errorf("failed to close statement: %w", closerErr)

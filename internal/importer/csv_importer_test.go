@@ -1,10 +1,11 @@
+//go:build integration
+
 package importer
 
 import (
 	"astroapi/internal/logger"
 	"context"
 	"database/sql"
-	"fmt"
 	"log"
 	"os"
 	"testing"
@@ -17,9 +18,9 @@ import (
 )
 
 func TestRunImportCSV(t *testing.T) {
-	// if testing.Short() {
-	// 	t.Skip("skipping integration test")
-	// }
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 
 	tests := []struct {
 		name             string
@@ -90,7 +91,6 @@ func TestRunImportCSV(t *testing.T) {
 			res, err := impr.RunImportCSV(ctx, file)
 			//require.NoError(t, err)
 
-			fmt.Println("res", res)
 			// Проверяем результаты
 			assert.NoError(t, err)
 			assert.Equal(t, tt.wantCountGoodStr, res.Imported, "Должно быть 3 хорошие строки") // TODO 3 заполнить

@@ -3,14 +3,14 @@
 package integration
 
 import (
-	"os/exec"
 	"astroapi/internal/logger"
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
-	"log"
 
 	"github.com/testcontainers/testcontainers-go"
 	tc "github.com/testcontainers/testcontainers-go"
@@ -58,7 +58,7 @@ func TestMain(m *testing.M) {
 	env, err := setupIntegrationEnv(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to setup env: %v\n", err)
-        os.Exit(1)
+		os.Exit(1)
 	}
 	testEnv = env
 
