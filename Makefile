@@ -17,6 +17,19 @@ MOCKGEN_VERSION       := v0.6.0
 GOLANGCI_LINT_VERSION := latest
 GOOSE_VERSION         := v3.22.0
 
+ifneq (,$(wildcard ./.env))
+    include .env
+    export
+endif
+
+# Собираем DSN из переменных
+define BUILD_DSN
+postgres://$(DB_USER):$(DB_PASSWORD)@localhost:$(DB_PORT)/$(DB_NAME)?sslmode=disable
+endef
+
+DB_DSN := $(call BUILD_DSN)
+
+
 # ---- phony -----------------------------------------------------------
 .PHONY: help tools tidy fmt vet \
         build run clean \
@@ -131,7 +144,8 @@ dev-restart: ## rebuild and restart only the app
 # Ожидает переменную окружения DB_DSN, например:
 #   export DB_DSN="host=localhost port=5432 user=postgres password=... dbname=astrobackend sslmode=disable"
 migrate-up: ## apply all migrations
-	goose -dir migrations postgres "$${DB_DSN}" up
+	#@echo "Using DSN: $(DB_DSN)"  # для отладки
+	goose -dir migrations postgres "$(DB_DSN)" up
 
 migrate-down: ## rollback the last migration
 	goose -dir migrations postgres "$${DB_DSN}" down

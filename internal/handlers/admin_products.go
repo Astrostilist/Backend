@@ -63,7 +63,7 @@ func (h *AdminProductsHandler) ListProducts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	result, err := h.repository.List(r.Context(), options) // TODO
+	result, err := h.repository.List(r.Context(), options)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch products")
 		return
@@ -72,7 +72,7 @@ func (h *AdminProductsHandler) ListProducts(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Products fetched successfully",
 		Data: adminProductsListResponse{
-			Items:    result.Items, // TODO
+			Items:    result.Items,
 			Metadata: buildPaginationMetadata(page, pageSize, result.TotalCount),
 		},
 	})
@@ -85,7 +85,7 @@ func (h *AdminProductsHandler) GetProduct(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	productItem, err := h.repository.GetBySKU(r.Context(), sku) // TODO
+	productItem, err := h.repository.GetBySKU(r.Context(), sku)
 	if err != nil {
 		if errors.Is(err, products.ErrProductNotFound) {
 			writeError(w, http.StatusNotFound, "product not found")
@@ -97,7 +97,7 @@ func (h *AdminProductsHandler) GetProduct(w http.ResponseWriter, r *http.Request
 
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Product fetched successfully",
-		Data:    productItem, // TODO
+		Data:    productItem,
 	})
 }
 
@@ -108,19 +108,19 @@ func (h *AdminProductsHandler) PatchProduct(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	payload, err := decodeProductPatchRequest(r) // TODO
+	payload, err := decodeProductPatchRequest(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	input, tagsChanged, err := payload.toPatchInput() // TODO
+	input, tagsChanged, err := payload.toPatchInput()
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
-	updatedProduct, err := h.repository.Patch(r.Context(), sku, input) // TODO
+	updatedProduct, err := h.repository.Patch(r.Context(), sku, input)
 	if err != nil {
 		if errors.Is(err, products.ErrProductNotFound) {
 			writeError(w, http.StatusNotFound, "product not found")
@@ -139,7 +139,7 @@ func (h *AdminProductsHandler) PatchProduct(w http.ResponseWriter, r *http.Reque
 
 	writeJSON(w, http.StatusOK, Response{
 		Message: "Product updated successfully",
-		Data:    updatedProduct, // TODO
+		Data:    updatedProduct,
 	})
 }
 

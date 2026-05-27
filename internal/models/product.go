@@ -34,13 +34,13 @@ type ErrCatalog struct {
 // CatalogProduct - появился на основании реального файла csv. Многие поля отсутствовали в ТЗ.
 // Поэтому структура
 type CatalogProduct struct {
-	Ext_product_id string   `json:"ext_product_id,omitzero"` // Внешний ID - уникален в глобальном смысле
-	SKU            string   `json:"sku,omitzero"`            // XML ID  // TODO должно рассчитываться отдельно (уникален в пределах системы)
-	Name           string   `json:"name,omitzero"`           // Название
-	Price          float64  `json:"price,omitzero"`          // Закупочная цена торгового предложения
-	Category       string   `json:"category,omitzero"`       // Группа
-	Images         []string `json:"images,omitzero"`         // Фото
-	Url            string   `json:"url,omitzero"`            // Ссылка в магазине
+	ExtProductID string   `json:"ext_product_id,omitzero"` // Внешний ID - уникален в глобальном смысле
+	SKU          string   `json:"sku,omitzero"`            // XML ID  // TODO должно рассчитываться отдельно (уникален в пределах системы)
+	Name         string   `json:"name,omitzero"`           // Название
+	Price        float64  `json:"price,omitzero"`          // Закупочная цена торгового предложения
+	Category     string   `json:"category,omitzero"`       // Группа
+	Images       []string `json:"images,omitzero"`         // Фото
+	URL          string   `json:"url,omitzero"`            // Ссылка в магазине
 
 	Article string `json:"article,omitzero"`
 

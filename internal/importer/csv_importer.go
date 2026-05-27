@@ -43,7 +43,6 @@ func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, 
 	}
 
 	batchSize := 500
-	//	batch := make([]*models.Product, 0, batchSize)
 	batch := make([]*models.CatalogProduct, 0, batchSize)
 	result := &models.ImportResult{Errors: []models.ErrCatalog{}}
 
@@ -76,14 +75,14 @@ func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, 
 			// инфо в лог
 			m.logger.Sugar().Infof("flushing batch count %d", batchSize)
 			start := time.Now()
-			defer func() {
-				m.logger.Sugar().Infof("batch flushed duration_ms %v", time.Since(start).Milliseconds())
-			}()
 
 			if err := flushBatchCatalog(ctx, m.db, batch); err != nil {
 				m.logger.Error("batch insert failed:", zap.Error(err))
 				return nil, err
 			}
+
+			m.logger.Sugar().Infof("batch flushed duration_ms %v", time.Since(start).Milliseconds())
+
 			result.Imported += len(batch)
 			batch = batch[:0]
 		}
@@ -94,15 +93,16 @@ func (m *PostgresRepository) RunImportCSV(ctx context.Context /* db *sql.DB,*/, 
 		// инфо в лог
 		m.logger.Sugar().Infof("flushing batch count %d", lenBatch)
 		start := time.Now()
-		defer func() {
-			m.logger.Sugar().Infof("batch flushed duration_ms %v", time.Since(start).Milliseconds())
-		}()
 
 		if err := flushBatchCatalog(ctx, m.db, batch); err != nil {
 			m.logger.Error("final batch insert failed:", zap.Error(err))
 			return nil, err
 		}
+
+		m.logger.Sugar().Infof("batch flushed duration_ms %v", time.Since(start).Milliseconds())
+
 		result.Imported += len(batch)
+
 	}
 
 	return result, nil
@@ -147,34 +147,28 @@ func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduc
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Базовая> (price) должно быть > 0"})
 	}
 
-	// images = "Фото"
 	img := record[1]
 	images := strings.Split(img, ";")
 
-	// * - обяз-но, name = "Название"
 	name := record[2]
 	if name == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Наименование> обязательно"})
 	}
 
-	// article = "Артикл"
 	article := record[3]
 
-	// category = "Группа"
 	category := record[6]
-	// * - обяз-но, SKU ==  "XML ID"
+
 	sku := strings.TrimSpace(record[9])
 	if sku == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <XML ID> (SKU) обязательно"})
 	}
 
-	// * - обяз-но, ext_product_id = "Внешний ID"
-	ext_product_id := strings.TrimSpace(record[13])
-	if ext_product_id == "" {
+	extProductID := strings.TrimSpace(record[13])
+	if extProductID == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Внешний ID> обязательно"})
 	}
 
-	// * - обяз-но, url == Ссылка в магазине
 	url := record[18]
 	if url == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Ссылка в магазине> обязательно"})
@@ -183,27 +177,28 @@ func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduc
 	// в зависимости от успеха валидации файла формируется return
 	if len(errCtl) == 0 {
 		return &models.CatalogProduct{
-			Article:        article,
-			Category:       category,
-			Ext_product_id: ext_product_id,
-			Images:         images,
-			Name:           name,
-			Price:          price,
-			SKU:            sku,
-			Url:            url,
+			Article:      article,
+			Category:     category,
+			ExtProductID: extProductID,
+			Images:       images,
+			Name:         name,
+			Price:        price,
+			SKU:          sku,
+			URL:          url,
 		}, errCtl, nil
-	} else {
-		return &models.CatalogProduct{
-			Article:        article,
-			Category:       category,
-			Ext_product_id: ext_product_id,
-			Images:         images,
-			Name:           name,
-			Price:          price,
-			SKU:            sku,
-			Url:            url,
-		}, errCtl, models.ErrValidateCatalog
 	}
+
+	return &models.CatalogProduct{
+		Article:      article,
+		Category:     category,
+		ExtProductID: extProductID,
+		Images:       images,
+		Name:         name,
+		Price:        price,
+		SKU:          sku,
+		URL:          url,
+	}, errCtl, models.ErrValidateCatalog
+
 }
 
 /*
@@ -283,7 +278,7 @@ func flushBatchCatalog(ctx context.Context, db *sql.DB, products []*models.Catal
 		if p.SKU == "" {
 			return fmt.Errorf("product at index %d has empty SKU", i)
 		}
-		if p.Ext_product_id == "" {
+		if p.ExtProductID == "" {
 			return fmt.Errorf("product %s has empty ext_product_id", p.SKU)
 		}
 		if p.Name == "" {
@@ -292,12 +287,12 @@ func flushBatchCatalog(ctx context.Context, db *sql.DB, products []*models.Catal
 
 		args := []any{
 			p.SKU,
-			p.Ext_product_id,
+			p.ExtProductID,
 			p.Name,
 			p.Article,
 			p.Category,
 			p.Price,
-			p.Url,
+			p.URL,
 			pq.Array(p.Images),
 		}
 

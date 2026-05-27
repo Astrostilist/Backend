@@ -5,10 +5,12 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 )
 
 type AdminImportHandler struct {
 	repository importer.Repository
+	logger     *zap.Logger
 }
 
 func NewAdminImportHandler(repository importer.Repository) *AdminImportHandler {
@@ -21,6 +23,7 @@ func RegisterAdminImportRoutes(router chi.Router, adminToken string, handler *Ad
 		router.Post("/", handler.StartImport)
 	})
 }
+
 func (h *AdminImportHandler) StartImport(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseMultipartForm(32 << 20)
 	if err != nil {

@@ -38,11 +38,9 @@ func (r *PostgresRepository) List(ctx context.Context, options ListOptions) (Lis
 	if err != nil {
 		return ListResult{}, err
 	}
-	//args := []any{options.limit(), options.offset(), *options.IsActive}
 	args := []any{options.Category, tagsFilter, options.Limit, options.Offset}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		//return nil, Metadata{}, err
 		return ListResult{}, fmt.Errorf("list products: %w", err)
 	}
 	defer func() {
@@ -54,7 +52,7 @@ func (r *PostgresRepository) List(ctx context.Context, options ListOptions) (Lis
 
 	items := make([]models.CatalogProduct, 0)
 	for rows.Next() {
-		item := models.CatalogProduct{}
+		var item models.CatalogProduct
 		var scanErr error
 		item, totalCount, scanErr = scanProduct(rows, true)
 		if scanErr != nil {
@@ -177,13 +175,13 @@ func scanProduct(scanner rowScanner, withCount bool) (models.CatalogProduct, int
 		err = scanner.Scan(
 			&totalCount,
 			&productItem.SKU,
-			&productItem.Ext_product_id,
+			&productItem.ExtProductID,
 			&productItem.Name,
 			&productItem.Price,
 			&productItem.Article,
 			&tagsJSON,
 			&productItem.Category,
-			&productItem.Url,
+			&productItem.URL,
 			&urlImgs,
 			&productItem.Rating,
 			&productItem.CreatedAt,
@@ -192,13 +190,13 @@ func scanProduct(scanner rowScanner, withCount bool) (models.CatalogProduct, int
 	} else {
 		err = scanner.Scan(
 			&productItem.SKU,
-			&productItem.Ext_product_id,
+			&productItem.ExtProductID,
 			&productItem.Name,
 			&productItem.Price,
 			&productItem.Article,
 			&tagsJSON,
 			&productItem.Category,
-			&productItem.Url,
+			&productItem.URL,
 			&urlImgs,
 			&productItem.Rating,
 			&productItem.CreatedAt,

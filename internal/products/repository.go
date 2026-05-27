@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"astroapi/internal/models"
@@ -30,7 +31,7 @@ func FindByTags(ctx context.Context, db *sql.DB, tags []string, limit, offset in
 		if i > 0 {
 			builder.WriteString(",")
 		}
-		builder.WriteString(fmt.Sprintf("%q", t))
+		builder.WriteString(strconv.Quote(t))
 	}
 	builder.WriteString("}")
 	pgArray := builder.String()
@@ -66,13 +67,13 @@ func FindByTags(ctx context.Context, db *sql.DB, tags []string, limit, offset in
 		//        sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at
 		if err := rows.Scan(
 			&p.SKU,
-			&p.Ext_product_id,
+			&p.ExtProductID,
 			&p.Name,
 			&p.Price,
 			&p.Article,
 			&tagsJSON,
 			&p.Category,
-			&p.Url,
+			&p.URL,
 			&urlImgs,
 			&rating,
 			&p.CreatedAt,
