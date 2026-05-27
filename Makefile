@@ -1,63 +1,152 @@
-.PHONY: build lint test run clean help
+SHELL := /usr/bin/env bash
 
-BINARY_NAME=astro-backend
-BUILD_DIR=bin
-CMD_PATH=cmd/main.go
+# ---- project config --------------------------------------------------
+BINARY_NAME   := astro-backend
+BUILD_DIR     := bin
+CMD_PATH      := ./cmd
+ENV_FILE      := .env
+INFRA_COMPOSE := docker-compose.infra.yaml
+DEV_COMPOSE   := docker-compose.dev.yaml
+PROD_COMPOSE  := docker-compose.yaml
+GOBIN         = $(shell GOTOOLCHAIN=local go env GOPATH)/bin
 
-deps:
-	@echo "Installing development"
-	@go install go.uber.org/mock/mockgen@latest
-	@echo "Mockgen installed"
+# pinned tool versions
+MOCKGEN_VERSION       := v0.6.0
+# golangci-lint ставим через go install (собирается локальным go), версию
+# фиксируем на latest — скрипт выполняется один раз через `make tools`.
+GOLANGCI_LINT_VERSION := latest
+GOOSE_VERSION         := v3.22.0
 
-generate-mocks:
-	@echo "Setting up mock generation with go uber mock"
-	@echo "Checking mockgen tool..."
-	@go run go.uber.org/mock/mockgen@latest -version
-	@echo ""
-	@echo "TODO: Add specific mockgen commands when interfaces are defined in packages"
-	@echo "Ready to generate mocks for future interfaces"
+# ---- phony -----------------------------------------------------------
+.PHONY: help tools tidy fmt vet \
+        build run clean \
+        test test-race test-integration cover \
+        lint mocks mocks-clean generate \
+        docker-build docker-up docker-down \
+        infra-up infra-down infra-logs \
+        dev-up dev-down dev-logs dev-restart \
+        migrate-up migrate-down migrate-status \
+        init-superadmin generate-key
 
-help:
-	@echo "Available targets:"
-	@echo "  deps           - Install development dependencies (mockgen)"
-	@echo "  generate-mocks - Generate mocks for interfaces"
-	@echo "  build          - Build the application"
-	@echo "  lint           - Run golangci-lint"
-	@echo "  test           - Run tests with verbose output"
-	@echo "  test-race      - Run tests with race detector"
-	@echo "  run            - Run the application"
-	@echo "  clean          - Clean build artifacts"
+.DEFAULT_GOAL := help
 
-#для отображения кирилицы в PowerShell ввести
-#chcp 65001
+help: ## show this help
+	@awk 'BEGIN {FS = ":.*##"; printf "\nAvailable targets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-GOBIN := $(shell go env GOPATH)/bin
+# ---- tooling ---------------------------------------------------------
+tools: ## install development tools (mockgen, golangci-lint, goose)
+	@echo ">> installing mockgen $(MOCKGEN_VERSION)"
+	@go install go.uber.org/mock/mockgen@$(MOCKGEN_VERSION)
+	@echo ">> installing golangci-lint $(GOLANGCI_LINT_VERSION)"
+	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) || \
+		(echo "go install failed, falling back to install script" && \
+		 curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(GOBIN) $(GOLANGCI_LINT_VERSION))
+	@echo ">> installing goose $(GOOSE_VERSION)"
+	@go install github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION) || true
+	@echo "tools installed into $(GOBIN)"
 
-.PHONY: all
-all: build
+tidy: ## go mod tidy
+	go mod tidy
 
-.PHONY: build
-build:
+fmt: ## gofmt all sources
+	gofmt -s -w .
+
+vet: ## go vet
+	go vet ./...
+
+# ---- build / run -----------------------------------------------------
+build: ## build server binary into bin/
 	@mkdir -p $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_PATH)
 
-lint:
-	golangci-lint run ./...
-
-.PHONY: run
-run:
+run: ## run server locally (uses $(ENV_FILE))
 	go run $(CMD_PATH)
 
-.PHONY: test
-test:
-	go test -v ./...
+clean: ## remove build artifacts and caches
+	rm -rf $(BUILD_DIR) coverage.out
 
-test-race:
-	go test -race -v ./...
+# ---- tests -----------------------------------------------------------
+test: ## unit tests (without -race, fast)
+	go test ./... -count=1
 
-#не работает в PowerShell - использовать Git Bash
-.PHONY: clean
-clean:
-	rm -rf $(BUILD_DIR)
+test-race: ## unit tests with race detector
+	go test -race -count=1 ./...
 
-.DEFAULT_GOAL := help
+test-integration: ## integration tests (requires Docker)
+	go test -tags=integration -count=1 ./...
+
+cover: ## tests + coverage summary
+	go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
+
+# ---- lint / generate -------------------------------------------------
+lint: ## run golangci-lint (use $GOBIN binary first, fallback to PATH)
+	@bin="$(GOBIN)/golangci-lint"; \
+	if [[ -x "$$bin" ]]; then \
+		"$$bin" run ./...; \
+	else \
+		golangci-lint run ./...; \
+	fi
+
+mocks: ## regenerate all gomock mocks
+	@PATH="$(GOBIN):$$PATH" go generate ./...
+
+mocks-clean: ## remove generated mocks
+	@find . -path '*/mocks/mock_*.go' -delete
+	@echo "mocks removed"
+
+generate: mocks ## alias: run every go generate
+
+# ---- docker ---------------------------------------------------------
+docker-build: ## build production docker image
+	docker build -t $(BINARY_NAME):latest .
+
+docker-up: ## start full stack (prod compose, app + infra in docker)
+	docker compose -f $(PROD_COMPOSE) up -d --build
+
+docker-down: ## stop full stack
+	docker compose -f $(PROD_COMPOSE) down
+
+infra-up: ## start only infra (postgres/nats/memcached/jaeger) for local dev
+	docker compose -f $(INFRA_COMPOSE) up -d
+
+infra-down: ## stop local infra
+	docker compose -f $(INFRA_COMPOSE) down
+
+infra-logs: ## tail local infra logs
+	docker compose -f $(INFRA_COMPOSE) logs -f
+
+dev-up: ## start local infra AND app with hot-reload (air)
+	docker compose -f $(DEV_COMPOSE) up -d --build
+
+dev-down: ## stop local environment
+	docker compose -f $(DEV_COMPOSE) down
+
+dev-logs: ## tail logs 
+	docker compose -f $(DEV_COMPOSE) logs -f
+
+dev-restart: ## rebuild and restart only the app
+	docker compose -f $(DEV_COMPOSE) up -d --build --force-recreate app
+
+# ---- migrations -----------------------------------------------------
+# Ожидает переменную окружения DB_DSN, например:
+#   export DB_DSN="host=localhost port=5432 user=postgres password=... dbname=astrobackend sslmode=disable"
+migrate-up: ## apply all migrations
+	goose -dir migrations postgres "$${DB_DSN}" up
+
+migrate-down: ## rollback the last migration
+	goose -dir migrations postgres "$${DB_DSN}" down
+
+migrate-status: ## show migration status
+	goose -dir migrations postgres "$${DB_DSN}" status
+
+init-superadmin: ## create first SuperAdmin from SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD
+	go run ./cmd/superadmin
+
+# ---- helpers --------------------------------------------------------
+generate-key: ## generate or replace ENCRYPTION_KEY (base64, 32 bytes) in $(ENV_FILE)
+	@if [[ ! -f $(ENV_FILE) ]]; then touch $(ENV_FILE); fi; \
+	KEY=$$(head -c 32 /dev/urandom | base64 | tr -d '\n'); \
+	TMP=$$(mktemp); \
+	awk -v key="ENCRYPTION_KEY=$$KEY" 'BEGIN { replaced=0 } /^ENCRYPTION_KEY=/ { if (!replaced) { print key; replaced=1 }; next } { print } END { if (!replaced) print key }' $(ENV_FILE) > $$TMP; \
+	mv $$TMP $(ENV_FILE); \
+	echo "ENCRYPTION_KEY generated in $(ENV_FILE)"

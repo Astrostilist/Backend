@@ -7,6 +7,7 @@ type Product struct {
 	Price float64
 	Tags []string
 	Category string
+	Rating float64
 }
 
 type ImportResult struct {
