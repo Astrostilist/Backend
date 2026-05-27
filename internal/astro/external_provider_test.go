@@ -15,8 +15,8 @@ func TestExternalAstroProviderGetNatalChartMapsPlanetsAndTriggers(t *testing.T) 
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
 		}
-		if r.URL.Path != "/api/v2/vedic/chart" {
-			t.Fatalf("path = %s, want /api/v2/vedic/chart", r.URL.Path)
+		if r.URL.Path != "/api/v1/natal/calculate" {
+			t.Fatalf("path = %s, want /api/v1/natal/calculate", r.URL.Path)
 		}
 		if r.Header.Get("x-api-key") != "secret" {
 			t.Fatalf("missing x-api-key header")

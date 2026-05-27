@@ -43,7 +43,8 @@ type AstroProvider interface {
 
 func BuildNatalChartCacheKey(dob DateOfBirth, lat float64, lon float64) string {
 	return fmt.Sprintf(
-		"natal_chart:%04d-%02d-%02dT%02d:%02d:%s:%.5f:%.5f",
+		//"natal_chart:%04d-%02d-%02dT%02d:%02d:%s:%.5f:%.5f",
+		"natal_chart_%04d-%02d-%02dT%02d-%02d_%s_%.5f_%.5f",
 		dob.Year,
 		dob.Month,
 		dob.Day,
