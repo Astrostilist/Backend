@@ -9,9 +9,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"astroapi/internal/repositories/domain"
 	"astroapi/internal/requests"
 	"astroapi/internal/usecases"
-	"astroapi/internal/usecases/repositories/domain"
 
 	"go.uber.org/zap"
 )
@@ -84,6 +84,8 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 				"user_id":       "not-a-uuid",
 				"birth_date":    "1990-01-01",
 				"birth_place":   "Moscow",
+				"lat":           55.7558,
+				"lon":           37.6173,
 				"consent_given": true,
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -95,6 +97,8 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 				"user_id":       "123e4567-e89b-12d3-a456-426614174000",
 				"birth_date":    "1990-01-01",
 				"birth_place":   "Moscow",
+				"lat":           55.7558,
+				"lon":           37.6173,
 				"consent_given": true,
 			},
 			mockRepoErr:    errors.New("db timeout"),
@@ -107,6 +111,8 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 				"user_id":       "123e4567-e89b-12d3-a456-426614174000",
 				"birth_date":    "1990-01-01",
 				"birth_place":   "Moscow",
+				"lat":           55.7558,
+				"lon":           37.6173,
 				"consent_given": true,
 			},
 			mockSaveErr:    errors.New("save failed"),
@@ -119,6 +125,8 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 				"user_id":       "123e4567-e89b-12d3-a456-426614174000",
 				"birth_date":    "1990-01-01",
 				"birth_place":   "Moscow",
+				"lat":           55.7558,
+				"lon":           37.6173,
 				"consent_given": false,
 			},
 			mockCacheErr:   errors.New("cache failed"),
@@ -131,6 +139,8 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 				"user_id":       "123e4567-e89b-12d3-a456-426614174000",
 				"birth_date":    "1990-01-01",
 				"birth_place":   "Moscow",
+				"lat":           55.7558,
+				"lon":           37.6173,
 				"consent_given": true,
 			},
 			mockPubErr:     errors.New("nats connection lost"),
@@ -143,6 +153,8 @@ func TestProfileHandler_HandleProfile(t *testing.T) {
 				"user_id":       "123e4567-e89b-12d3-a456-426614174000",
 				"birth_date":    "1990-01-01",
 				"birth_place":   "Moscow",
+				"lat":           55.7558,
+				"lon":           37.6173,
 				"consent_given": true,
 			},
 			expectedStatus: http.StatusAccepted,

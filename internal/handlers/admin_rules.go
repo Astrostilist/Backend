@@ -12,6 +12,7 @@ import (
 
 	rules "astroapi/internal/ruleengine"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -37,9 +38,9 @@ func NewAdminRulesHandler(repository rules.Repository) *AdminRulesHandler {
 	return &AdminRulesHandler{repository: repository}
 }
 
-func RegisterAdminRulesRoutes(router chi.Router, adminToken string, handler *AdminRulesHandler) {
+func RegisterAdminRulesRoutes(router chi.Router, secretTokenAdmin string, cache *memcache.Client, handler *AdminRulesHandler) {
 	router.Route("/api/v1/admin/rules", func(router chi.Router) {
-		router.Use(AdminAuthMiddleware(adminToken))
+		router.Use(AdminAuthMiddleware(cache, secretTokenAdmin))
 		router.Get("/", handler.ListRules)
 		router.Post("/", handler.CreateRule)
 		router.Get("/{id}", handler.GetRule)

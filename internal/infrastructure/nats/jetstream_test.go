@@ -107,8 +107,10 @@ func TestPipeline_PublishFlatSubject_ReachesConsumer(t *testing.T) {
 
 	select {
 	case data := <-done:
+		var msg models.MessageWithTrace
 		var got map[string]string
-		require.NoError(t, json.Unmarshal(data, &got))
+		require.NoError(t, json.Unmarshal(data, &msg))
+		json.Unmarshal(msg.Payload, &got)
 		require.Equal(t, "req-1", got["request_id"])
 	case <-time.After(3 * time.Second):
 		t.Fatalf("consumer did not receive message within timeout (filter mismatch?)")

@@ -11,7 +11,9 @@ import (
 	"astroapi/internal/models"
 	"astroapi/internal/products"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 )
 
 const (
@@ -23,6 +25,7 @@ const (
 type AdminProductsHandler struct {
 	repository       products.Repository
 	cacheInvalidator products.CacheInvalidator
+	logger           *zap.Logger
 }
 
 type adminProductsListResponse struct {
@@ -43,13 +46,16 @@ type adminProductPatchRequest struct {
 	Tags  *[]string `json:"tags"`
 }
 
-func NewAdminProductsHandler(repository products.Repository, cacheInvalidator products.CacheInvalidator) *AdminProductsHandler {
-	return &AdminProductsHandler{repository: repository, cacheInvalidator: cacheInvalidator}
+func NewAdminProductsHandler(repository products.Repository, cacheInvalidator products.CacheInvalidator, logger *zap.Logger) *AdminProductsHandler {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &AdminProductsHandler{repository: repository, cacheInvalidator: cacheInvalidator, logger: logger}
 }
 
-func RegisterAdminProductsRoutes(router chi.Router, adminToken string, handler *AdminProductsHandler) {
+func RegisterAdminProductsRoutes(router chi.Router, secretTokenAdmin string, cache *memcache.Client, handler *AdminProductsHandler) {
 	router.Route("/api/v1/admin/products", func(router chi.Router) {
-		router.Use(AdminAuthMiddleware(adminToken))
+		router.Use(AdminAuthMiddleware(cache, secretTokenAdmin))
 		router.Get("/", handler.ListProducts)
 		router.Get("/{sku}", handler.GetProduct)
 		router.Patch("/{sku}", handler.PatchProduct)
@@ -65,8 +71,11 @@ func (h *AdminProductsHandler) ListProducts(w http.ResponseWriter, r *http.Reque
 
 	result, err := h.repository.List(r.Context(), options)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to fetch products")
+		writeError(w, http.StatusInternalServerError, "db_unavailable")
 		return
+	}
+	if len(result.Items) == 0 && result.TotalCount == 0 {
+		h.logger.Debug("no products found", zap.Any("filters", options))
 	}
 
 	writeJSON(w, http.StatusOK, Response{

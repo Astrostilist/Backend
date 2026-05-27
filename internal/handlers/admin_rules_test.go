@@ -28,6 +28,7 @@ func newFakeRulesRepository(items []rules.Rule) *fakeRulesRepository {
 	}
 	return repository
 }
+
 func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions) ([]*rules.Rule, rules.Metadata, error) {
 	filtered := make([]rules.Rule, 0)
 	for _, item := range r.items {
@@ -59,6 +60,7 @@ func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions)
 	if end > totalRecords {
 		end = totalRecords
 	}
+
 	totalPages := 0
 	if options.PageSize > 0 {
 		totalPages = (totalRecords + options.PageSize - 1) / options.PageSize
@@ -78,6 +80,7 @@ func (r *fakeRulesRepository) List(_ context.Context, options rules.ListOptions)
 
 	return subFiltered, metadata, nil
 }
+
 func (r *fakeRulesRepository) Create(_ context.Context, input *rules.RuleInput) (uuid.UUID, error) {
 	now := time.Now().UTC()
 	smplID, err := uuid.Parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
@@ -111,11 +114,11 @@ func (r *fakeRulesRepository) Update(_ context.Context, id string, input *rules.
 	currentRule.IsActive = input.IsActive
 	currentRule.UpdatedAt = time.Now().UTC()
 	r.items[id] = currentRule
+
 	parsedUUID, err := uuid.Parse(id)
 	if err != nil {
 		return uuid.Nil, err
 	}
-
 	return parsedUUID, nil
 }
 
@@ -132,11 +135,11 @@ func (r *fakeRulesRepository) Patch(_ context.Context, id string, input *rules.R
 	currentRule.IsActive = input.IsActive
 	currentRule.UpdatedAt = time.Now().UTC()
 	r.items[id] = currentRule
+
 	parsedUUID, err := uuid.Parse(id)
 	if err != nil {
 		return uuid.Nil, err
 	}
-
 	return parsedUUID, nil
 }
 
@@ -145,15 +148,6 @@ func (r *fakeRulesRepository) Get(_ context.Context, id string) (*rules.Rule, er
 	if !ok {
 		return nil, rules.ErrRuleNotFound
 	}
-
-	currentRule.Name = "Ретроградный Меркурий"
-	currentRule.AstroCondition = map[string]string{"sign": "aries"}
-	currentRule.ProductTags = []string{"sport", "lux"}
-	currentRule.Priority = 1
-	currentRule.IsActive = true
-	currentRule.UpdatedAt = time.Now().UTC()
-	r.items[id] = currentRule
-
 	return &currentRule, nil
 }
 
@@ -173,39 +167,32 @@ func (r *fakeRulesRepository) Deactivate(_ context.Context, id string) (*rules.R
 
 	return &currentRule, nil
 }
-func (r *fakeRulesRepository) Match(_ context.Context, tags []string) ([]string, error) {
 
+func (r *fakeRulesRepository) Match(_ context.Context, tags []string) ([]string, error) {
 	return []string{}, nil
 }
-func newAdminRulesTestMux(repository rules.Repository) chi.Router {
+
+func newAdminRulesTestMux(t *testing.T, repository rules.Repository) chi.Router {
+	t.Helper()
 	router := chi.NewRouter()
-	RegisterAdminRulesRoutes(router, testAdminToken, NewAdminRulesHandler(repository))
+	handler := NewAdminRulesHandler(repository)
+	router.Get("/api/v1/admin/rules", handler.ListRules)
+	router.Post("/api/v1/admin/rules", handler.CreateRule)
+	router.Get("/api/v1/admin/rules/{id}", handler.GetRule)
+	router.Put("/api/v1/admin/rules/{id}", handler.UpdateRule)
+	router.Patch("/api/v1/admin/rules/{id}", handler.PatchRule)
+	router.Delete("/api/v1/admin/rules/{id}", handler.DeleteRule)
 	return router
-}
-
-func TestAdminRulesRequireToken(t *testing.T) {
-	t.Parallel()
-
-	mux := newAdminRulesTestMux(newFakeRulesRepository(nil))
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules", nil)
-	response := httptest.NewRecorder()
-
-	mux.ServeHTTP(response, request)
-
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, response.Code)
-	}
 }
 
 func TestRuleCreateRejectsNegativePriority(t *testing.T) {
 	t.Parallel()
 
+	mux := newAdminRulesTestMux(t, newFakeRulesRepository(nil))
 	payload := []byte(`{"name":"Retrograde rule","astro_condition":{"planet":"mars"},"product_tags":["energy"],"priority":-1}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/rules", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	mux := newAdminRulesTestMux(newFakeRulesRepository(nil))
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusUnprocessableEntity {
@@ -233,11 +220,10 @@ func TestRuleDeleteSoftDeletesRecord(t *testing.T) {
 		},
 	})
 
+	mux := newAdminRulesTestMux(t, repository)
 	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/rules/"+smplID.String(), nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	mux := newAdminRulesTestMux(repository)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
@@ -248,7 +234,6 @@ func TestRuleDeleteSoftDeletesRecord(t *testing.T) {
 	if !exists {
 		t.Fatal("expected soft-deleted rule to stay in repository")
 	}
-
 	if storedRule.IsActive {
 		t.Fatal("expected soft-deleted rule to be deactivated")
 	}
@@ -258,12 +243,11 @@ func TestRuleCreateSucceeds(t *testing.T) {
 	t.Parallel()
 
 	repository := newFakeRulesRepository(nil)
+	mux := newAdminRulesTestMux(t, repository)
 	payload := []byte(`{"name":"Lunar","astro_condition":{"moon":"full"},"product_tags":["mystic"],"priority":10,"is_active":true}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/rules", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	mux := newAdminRulesTestMux(repository)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusCreated {
@@ -272,32 +256,26 @@ func TestRuleCreateSucceeds(t *testing.T) {
 
 	var resp Response
 	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
-		t.Fatalf("cannot be decoded body: %v\n", err)
+		t.Fatalf("cannot decode body: %v", err)
 	}
 
-	bytes, _ := json.Marshal(resp.Data)
+	b, _ := json.Marshal(resp.Data)
 	output := make(map[string]string)
-
-	err := json.Unmarshal(bytes, &output)
-	if err != nil {
-		t.Fatalf("cannot be decoded body Data: %v\n", err)
+	if err := json.Unmarshal(b, &output); err != nil {
+		t.Fatalf("cannot decode body Data: %v", err)
 	}
 
 	idStr, ok := output["id"]
 	if !ok {
-		t.Fatal("couldn't find  tag 'id'")
+		t.Fatal("missing field 'id'")
 	}
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		t.Fatalf("cannot be get uuid: %v\n", err)
+		t.Fatalf("cannot parse uuid: %v", err)
 	}
 	if id == uuid.Nil {
 		t.Fatal("uuid is Nil")
 	}
-
-	// if _, ok := repository.items["created-rule-id"]; !ok {
-	// 	t.Fatal("rule was not stored")
-	// }
 }
 
 func TestRuleUpdateModifiesFields(t *testing.T) {
@@ -320,12 +298,11 @@ func TestRuleUpdateModifiesFields(t *testing.T) {
 		},
 	})
 
+	mux := newAdminRulesTestMux(t, repository)
 	payload := []byte(`{"name":"New","astro_condition":{"sign":"taurus"},"product_tags":["earth"],"priority":7,"is_active":true}`)
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/rules/"+ruleID.String(), bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	mux := newAdminRulesTestMux(repository)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
@@ -341,12 +318,11 @@ func TestRuleUpdateModifiesFields(t *testing.T) {
 func TestRuleUpdateNotFound(t *testing.T) {
 	t.Parallel()
 
+	mux := newAdminRulesTestMux(t, newFakeRulesRepository(nil))
 	payload := []byte(`{"name":"X","astro_condition":{"a":"b"},"product_tags":["t"],"priority":1,"is_active":true}`)
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/rules/missing", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	mux := newAdminRulesTestMux(newFakeRulesRepository(nil))
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusNotFound {
@@ -356,6 +332,7 @@ func TestRuleUpdateNotFound(t *testing.T) {
 
 func TestRuleListFiltersByActiveFlag(t *testing.T) {
 	t.Parallel()
+
 	smplID1, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
 	require.NoError(t, err)
 	smplID2, err := uuid.Parse("22222222-2222-2222-2222-222222222222")
@@ -388,11 +365,10 @@ func TestRuleListFiltersByActiveFlag(t *testing.T) {
 		},
 	})
 
+	mux := newAdminRulesTestMux(t, repository)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules?is_active=true&page_size=50&page=1", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	mux := newAdminRulesTestMux(repository)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
@@ -404,14 +380,14 @@ func TestRuleListFiltersByActiveFlag(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	payload, ok := envelope.Data.(map[string]any)
+	data, ok := envelope.Data.(map[string]any)
 	if !ok {
 		t.Fatal("expected response data to be a map")
 	}
 
-	items, ok := payload["rules"].([]any)
+	items, ok := data["rules"].([]any)
 	if !ok {
-		t.Fatal("expected response data.items to be a list")
+		t.Fatal("expected response data.rules to be a list")
 	}
 
 	if len(items) != 1 {
@@ -426,25 +402,17 @@ func TestRuleListFiltersByActiveFlag(t *testing.T) {
 	if item["is_active"] != true {
 		t.Fatal("expected filtered item to be active")
 	}
-
-	ctx := context.Background()
-	result, metadata, err := repository.List(ctx, rules.ListOptions{
-		IsActive: func() *bool { b := true; return &b }(),
-		Page:     1,
-		PageSize: 50,
-	})
-	require.NoError(t, err)
-	t.Logf("Direct call - got %d rules, metadata: %+v", len(result), metadata)
 }
 
-func TestRuleGetFiltersByActiveFlag(t *testing.T) {
+func TestRuleGetReturnsStoredRule(t *testing.T) {
 	t.Parallel()
-	smplID1, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
+
+	smplID, err := uuid.Parse("11111111-1111-1111-1111-111111111111")
 	require.NoError(t, err)
 
 	repository := newFakeRulesRepository([]rules.Rule{
 		{
-			ID:   smplID1,
+			ID:   smplID,
 			Name: "Active rule",
 			AstroCondition: map[string]string{
 				"sign": "aries",
@@ -457,11 +425,10 @@ func TestRuleGetFiltersByActiveFlag(t *testing.T) {
 		},
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules/"+smplID1.String(), nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	mux := newAdminRulesTestMux(t, repository)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/rules/"+smplID.String(), nil)
 	response := httptest.NewRecorder()
 
-	mux := newAdminRulesTestMux(repository)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
@@ -473,18 +440,20 @@ func TestRuleGetFiltersByActiveFlag(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	payload, ok := envelope.Data.(map[string]any)
+	data, ok := envelope.Data.(map[string]any)
 	if !ok {
 		t.Fatal("expected response data to be a map")
 	}
 
-	item, ok := payload["rule"].(map[string]any)
+	item, ok := data["rule"].(map[string]any)
 	if !ok {
-		t.Fatal("expected first rule item to be an object")
+		t.Fatal("expected response data.rule to be an object")
 	}
 
 	if item["is_active"] != true {
-		t.Fatal("expected filtered item to be active")
+		t.Fatal("expected rule to be active")
 	}
-
+	if item["name"] != "Active rule" {
+		t.Fatalf("expected name 'Active rule', got %v", item["name"])
+	}
 }

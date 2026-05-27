@@ -4,6 +4,7 @@ import (
 	"astroapi/internal/importer"
 	"net/http"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
@@ -17,9 +18,9 @@ func NewAdminImportHandler(repository importer.Repository) *AdminImportHandler {
 	return &AdminImportHandler{repository: repository}
 }
 
-func RegisterAdminImportRoutes(router chi.Router, adminToken string, handler *AdminImportHandler) {
+func RegisterAdminImportRoutes(router chi.Router, secretTokenAdmin string, cache *memcache.Client, handler *AdminImportHandler) {
 	router.Route("/api/v1/admin/catalog/import", func(router chi.Router) {
-		router.Use(AdminAuthMiddleware(adminToken))
+		router.Use(AdminAuthMiddleware(cache, secretTokenAdmin))
 		router.Post("/", handler.StartImport)
 	})
 }

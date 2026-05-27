@@ -48,7 +48,10 @@ paths:
             example:
               user_id: "123e4567-e89b-12d3-a456-426614174000"
               birth_date: "1990-05-15"
-              birth_place: "Moscow"
+              birth_time: "14:30"
+              lat: 55.7558
+              lon: 37.6173
+              timezone: "Europe/Moscow"
               consent_given: true
       responses:
         "202":
@@ -592,9 +595,57 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-
-# ─── Components ──────────────────────────────────────────────────────────────
-
+  /api/v1/user/{user_id}:
+    delete:
+      summary: Delete user
+      description: | 
+       Удаление данных пользователя.
+       Операция удаляет:
+       - users — основная запись;
+       - user_consents — история согласий;
+       - generation_results — результаты генерации для пользователя;
+       - feedback — обратная связь от пользователя.
+      tags: [Client API]
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        description: User identifier
+        schema:
+          type: string
+      responses:
+        "204":
+          description: User deleted successfully
+        "400":
+           description: Invalid request
+           content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              examples:
+                emptyUserId:
+                  value:
+                    error: id is required
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              examples:
+                userNotFound:
+                  value:
+                    error: user not found
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              examples:
+                internalError:
+                  value:
+                    error: internal server error
 components:
   securitySchemes:
     botAuth:
@@ -686,7 +737,7 @@ components:
 
     ProfileRequest:
       type: object
-      required: [user_id, birth_date, consent_given]
+      required: [user_id, birth_date, lat, lon, consent_given]
       properties:
         user_id:
           type: string
@@ -697,10 +748,26 @@ components:
           example: "1990-05-15"
         birth_time:
           type: string
+          description: "Время рождения в формате HH:mm. Если неизвестно, провайдер получит 00:00."
           example: "14:30"
         birth_place:
           type: string
+          description: "Опциональное человекочитаемое место рождения. Для external расчёта используются lat/lon."
           example: "Moscow"
+        lat:
+          type: number
+          format: double
+          description: "Широта места рождения"
+          example: 55.7558
+        lon:
+          type: number
+          format: double
+          description: "Долгота места рождения"
+          example: 37.6173
+        timezone:
+          type: string
+          description: "IANA timezone; если не передан, используется UTC"
+          example: "Europe/Moscow"
         consent_given:
           type: boolean
 
@@ -720,6 +787,10 @@ components:
           description: |
             Дополнительный контекст. Поддерживаемые ключи:
             - triggers (array of string) — астро-триггеры для Rule-Engine
+            - birth_time (string, HH:mm) — время рождения для расчёта натальной карты
+            - lat / birth_lat (number) — широта места рождения
+            - lon / birth_lon (number) — долгота места рождения
+            - timezone (string, IANA TZ, например Europe/Moscow)
             - gender (string)
             - occasion (string)
             - budget_range (string)

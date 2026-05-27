@@ -1,8 +1,8 @@
 package usecases
 
 import (
-	"astroapi/internal/usecases/repositories"
-	"astroapi/internal/usecases/repositories/domain"
+	"astroapi/internal/repositories"
+	"astroapi/internal/repositories/domain"
 	"context"
 	"database/sql"
 	"fmt"

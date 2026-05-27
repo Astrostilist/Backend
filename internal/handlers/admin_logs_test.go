@@ -15,8 +15,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-const testAdminToken = "test-admin-token" // TPDO: убрать после починки логов admin_rules
-
 type fakeAdminLogsRepository struct {
 	items       []adminlogs.LogEntry
 	called      bool
@@ -45,11 +43,13 @@ func (r *fakeAdminLogsRepository) List(_ context.Context, options adminlogs.List
 	return adminlogs.ListResult{Items: filtered, TotalCount: totalCount}, nil
 }
 
-// newAdminLogsTestMux создает chi-роутер для тестов admin logs.
+// newAdminLogsTestMux создает chi-роутер для тестов admin logs без auth middleware.
 // На вход принимает репозиторий, на выход возвращает настроенный роутер.
-func newAdminLogsTestMux(repository adminlogs.Repository) chi.Router {
+func newAdminLogsTestMux(t *testing.T, repository adminlogs.Repository) chi.Router {
+	t.Helper()
 	router := chi.NewRouter()
-	RegisterAdminLogsRoutes(router, testAdminToken, NewAdminLogsHandler(repository))
+	handler := NewAdminLogsHandler(repository)
+	router.Get("/api/v1/admin/logs", handler.ListLogs)
 	return router
 }
 
@@ -82,11 +82,12 @@ func TestListAdminLogsFiltersByFailedStatus(t *testing.T) {
 		{RequestID: "req-2", UserID: "user-2", Status: requests.StatusCompleted, CreatedAt: now},
 	}}
 
+	mux := newAdminLogsTestMux(t, repository)
+
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs?status=failed", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	newAdminLogsTestMux(repository).ServeHTTP(response, request)
+	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
@@ -119,11 +120,12 @@ func TestListAdminLogsRejectsLimitOverMax(t *testing.T) {
 	t.Parallel()
 
 	repository := &fakeAdminLogsRepository{}
+	mux := newAdminLogsTestMux(t, repository)
+
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs?limit=201", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	newAdminLogsTestMux(repository).ServeHTTP(response, request)
+	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, response.Code)
@@ -147,11 +149,12 @@ func TestListAdminLogsTruncatesErrorMessage(t *testing.T) {
 			CreatedAt:    time.Now().UTC(),
 		},
 	}}
+	mux := newAdminLogsTestMux(t, repository)
+
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	newAdminLogsTestMux(repository).ServeHTTP(response, request)
+	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)

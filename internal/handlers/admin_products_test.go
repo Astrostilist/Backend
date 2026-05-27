@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -17,7 +18,8 @@ import (
 )
 
 type fakeProductsRepository struct {
-	items map[string]models.CatalogProduct
+	items   map[string]models.CatalogProduct
+	listErr error
 }
 
 func newFakeProductsRepository(items []models.CatalogProduct) *fakeProductsRepository {
@@ -29,6 +31,10 @@ func newFakeProductsRepository(items []models.CatalogProduct) *fakeProductsRepos
 }
 
 func (r *fakeProductsRepository) List(_ context.Context, options products.ListOptions) (products.ListResult, error) {
+	if r.listErr != nil {
+		return products.ListResult{}, r.listErr
+	}
+
 	filtered := make([]models.CatalogProduct, 0, len(r.items))
 	for _, item := range r.items {
 		if options.Category != "" && item.Category != options.Category {
@@ -88,9 +94,12 @@ func (i *fakeProductCacheInvalidator) InvalidateProduct(_ context.Context, sku s
 	return nil
 }
 
-func newAdminProductsTestMux(repository products.Repository, invalidator products.CacheInvalidator) chi.Router {
+func newAdminProductsTestMux(t *testing.T, repository products.Repository, invalidator products.CacheInvalidator) chi.Router {
+	t.Helper()
 	router := chi.NewRouter()
-	RegisterAdminProductsRoutes(router, testAdminToken, NewAdminProductsHandler(repository, invalidator))
+	handler := NewAdminProductsHandler(repository, invalidator, nil)
+	router.Get("/api/v1/admin/products", handler.ListProducts)
+	router.Patch("/api/v1/admin/products/{sku}", handler.PatchProduct)
 	return router
 }
 
@@ -141,11 +150,11 @@ func TestListProductsFiltersByCategory(t *testing.T) {
 		},
 	})
 
+	mux := newAdminProductsTestMux(t, repository, nil)
+
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/products?category=rings&page=1&page_size=10", nil)
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	mux := newAdminProductsTestMux(repository, nil)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
@@ -179,15 +188,95 @@ func TestListProductsFiltersByCategory(t *testing.T) {
 	}
 }
 
+func TestListProductsUnknownTagReturnsEmptyList(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	repository := newFakeProductsRepository([]models.CatalogProduct{
+		{
+			SKU:       "sku-1",
+			Name:      "Silk scarf",
+			Price:     1200,
+			Tags:      []string{"silk"},
+			Category:  "scarves",
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	})
+
+	mux := newAdminProductsTestMux(t, repository, nil)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/products?tags=unknown", nil)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
+	}
+
+	var envelope Response
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	payload, ok := envelope.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected response data to be a map")
+	}
+
+	items, ok := payload["items"].([]any)
+	if !ok {
+		t.Fatal("expected response data.items to be a list")
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected empty products list, got %d", len(items))
+	}
+
+	metadata, ok := payload["metadata"].(map[string]any)
+	if !ok {
+		t.Fatal("expected response data.metadata to be a map")
+	}
+	if metadata["total_records"] != float64(0) {
+		t.Fatalf("expected total_records=0, got %v", metadata["total_records"])
+	}
+}
+
+func TestListProductsDBErrorReturnsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	repository := newFakeProductsRepository(nil)
+	repository.listErr = errors.New("connection refused")
+
+	mux := newAdminProductsTestMux(t, repository, nil)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/products?tags=silk", nil)
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, response.Code)
+	}
+
+	var envelope Response
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Error != "db_unavailable" {
+		t.Fatalf("expected db_unavailable error, got %q", envelope.Error)
+	}
+}
+
 func TestPatchProductUnknownSKUReturnsNotFound(t *testing.T) {
 	t.Parallel()
 
+	mux := newAdminProductsTestMux(t, newFakeProductsRepository(nil), nil)
+
 	payload := []byte(`{"tags":["new"]}`)
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/products/missing-sku", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	mux := newAdminProductsTestMux(newFakeProductsRepository(nil), nil)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusNotFound {
@@ -215,13 +304,12 @@ func TestPatchProductTagsInvalidatesCache(t *testing.T) {
 		},
 	})
 	invalidator := &fakeProductCacheInvalidator{}
+	mux := newAdminProductsTestMux(t, repository, invalidator)
 
 	payload := []byte(`{"tags":["new","summer"]}`)
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/products/sku-1", bytes.NewReader(payload))
-	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 
-	mux := newAdminProductsTestMux(repository, invalidator)
 	mux.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {

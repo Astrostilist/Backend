@@ -3,7 +3,7 @@
 package integration
 
 import (
-	"astroapi/internal/logger"
+	"astroapi/internal/infrastructure/logger"
 	"context"
 	"fmt"
 	"log"

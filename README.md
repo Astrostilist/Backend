@@ -15,6 +15,13 @@ ENCRYPTION_KEY=
 1. **Async (Асинхронный - по умолчанию):** Сервер мгновенно возвращает `202 Accepted` и `request_id`. Результат нужно запрашивать отдельно.
 2. **Sync (Синхронный):** Сервер удерживает соединение и ждет ответа от нейросети. Возвращает `200 OK` с готовым результатом. *Внимание: установлен жесткий таймаут 5 секунд, после которого вернется `504 Gateway Timeout`.*
 
+### DELETE `/api/v1/user/{user_id}`
+Эдпоинт для удаления данных клиента из таблиц:
+* users — основная запись;
+* user_consents — история согласий ;
+* generation_results — результаты генерации для пользователя;
+* feedback — обратная связь от пользователя.
+
 ### Process Personal Data UseCase
 Обработка персональных данных пользователя с учетом согласия (consent_given).
 **Поведение:**
@@ -42,10 +49,10 @@ go run ./cmd/superadmin
 ```env
 SUPERADMIN_EMAIL=admin@example.com
 SUPERADMIN_PASSWORD=__CHANGEME_MIN_8_CHARS__
-ADMIN_TOKEN=__CHANGEME_ADMIN_TOKEN__
+SECRET_TOKEN_ADMIN=__CHANGEME_ADMIN_TOKEN__
 ```
 
-`ADMIN_TOKEN` используется как секрет для подписи access token и остается совместимым со старой схемой доступа к admin routes. Повторный запуск bootstrap-команды не создает дубликат SuperAdmin.
+`SECRET_TOKEN_ADMIN` используется как секрет для подписи access token и остается совместимым со старой схемой доступа к admin routes. Повторный запуск bootstrap-команды не создает дубликат SuperAdmin.
 
 После создания SuperAdmin можно пройти авторизацию через AUTH-01:
 
