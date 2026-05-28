@@ -584,9 +584,9 @@ func TestDelete(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		input     RuleInput
-		want_uuid bool
+		name     string
+		input    RuleInput
+		wantUUID bool
 		// want      Rule
 	}{
 		{
@@ -601,7 +601,7 @@ func TestDelete(t *testing.T) {
 				Priority:    5,
 				IsActive:    true,
 			},
-			want_uuid: true,
+			wantUUID: true,
 		},
 	}
 
