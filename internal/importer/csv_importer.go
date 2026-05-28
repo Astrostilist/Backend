@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -149,6 +150,15 @@ func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduc
 
 	img := record[1]
 	images := strings.Split(img, ";")
+	var validImg []string
+	for _, rowStr := range images {
+		_, err := url.Parse(rowStr)
+		if err != nil {
+			errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Фото> содержит невалидный адрес"})
+			continue
+		}
+		validImg = append(validImg, rowStr)
+	}
 
 	name := record[2]
 	if name == "" {
@@ -169,9 +179,15 @@ func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduc
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Внешний ID> обязательно"})
 	}
 
-	url := record[18]
-	if url == "" {
+	urlProd := record[18]
+	if urlProd == "" {
 		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Ссылка в магазине> обязательно"})
+	}
+
+	_, err = url.Parse(urlProd)
+	if err != nil {
+		errCtl = append(errCtl, models.ErrCatalog{Row: rowNum, Reason: "поле <Фото> содержит невалидный адрес"})
+		urlProd = ""
 	}
 
 	// в зависимости от успеха валидации файла формируется return
@@ -180,11 +196,11 @@ func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduc
 			Article:      article,
 			Category:     category,
 			ExtProductID: extProductID,
-			Images:       images,
+			Images:       validImg,
 			Name:         name,
 			Price:        price,
 			SKU:          sku,
-			URL:          url,
+			URL:          urlProd,
 		}, errCtl, nil
 	}
 
@@ -192,11 +208,11 @@ func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduc
 		Article:      article,
 		Category:     category,
 		ExtProductID: extProductID,
-		Images:       images,
+		Images:       validImg,
 		Name:         name,
 		Price:        price,
 		SKU:          sku,
-		URL:          url,
+		URL:          urlProd,
 	}, errCtl, models.ErrValidateCatalog
 
 }

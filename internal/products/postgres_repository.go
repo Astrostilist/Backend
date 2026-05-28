@@ -28,11 +28,15 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 func (r *PostgresRepository) List(ctx context.Context, options ListOptions) (ListResult, error) {
 	totalCount := 0
 	query := `
-	SELECT COUNT(*) OVER(), sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at
-	FROM  products
-	WHERE ($1 = '' OR category = $1) AND ($2::jsonb IS NULL OR tags @> $2::jsonb)
-	ORDER BY created_at DESC
-	LIMIT $3 OFFSET $4`
+	SELECT COUNT(*) OVER(), 
+               sku, ext_product_id, title, price, article, 
+               tags, category, url, images, rating, created_at, updated_at
+        FROM products
+        WHERE ($1 = '' OR category ILIKE '%' || $1 || '%')
+          AND ($2::jsonb IS NULL OR tags @> $2::jsonb)
+        ORDER BY created_at DESC
+        LIMIT $3 OFFSET $4
+	`
 
 	tagsFilter, err := buildTagsFilterArg(options.Tags)
 	if err != nil {
