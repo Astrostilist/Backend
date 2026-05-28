@@ -40,7 +40,7 @@ func TestPostgresRepositoryListFiltersByCategory(t *testing.T) {
 		[]byte(`["silver"]`), "rings", "https://example.com",
 		pq.Array([]string{"https://example.com/img.jpg"}), 4.5, now, now)
 
-	mock.ExpectQuery(`SELECT COUNT\(\*\) OVER\(\), sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at FROM products WHERE \(\$1 = '' OR category = \$1\) AND \(\$2::jsonb IS NULL OR tags @> \$2::jsonb\) ORDER BY created_at DESC LIMIT \$3 OFFSET \$4`).
+	mock.ExpectQuery(`SELECT COUNT\(\*\) OVER\(\), sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at FROM products WHERE \(\$1 = '' OR category ILIKE '%' || $1 || '%'\) AND \(\$2::jsonb IS NULL OR tags @> $2::jsonb\) ORDER BY created_at DESC LIMIT $3 OFFSET $4`).
 		WithArgs("rings", nil, 10, 0).
 		WillReturnRows(rows)
 
