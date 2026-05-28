@@ -1,9 +1,7 @@
-//go:build integration
-
 package importer
 
 import (
-	"astroapi/internal/logger"
+	"astroapi/internal/infrastructure/logger"
 	"context"
 	"database/sql"
 	"log"

@@ -1,5 +1,3 @@
-//go:build integration
-
 package ruleengine
 
 import (
@@ -360,8 +358,8 @@ func TestList(t *testing.T) {
 			},
 			opt: ListOptions{
 				IsActive: func(b bool) *bool { return &b }(true),
-				PageSize: 10,
-				Page:     1,
+				PageSize: 2,
+				Page:     2,
 			},
 			wantList: []RuleInput{
 				{
@@ -677,6 +675,9 @@ func TestDelete(t *testing.T) {
 }
 
 func TestCreateAndMatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 	tests := []struct {
 		name          string
 		input         []RuleInput

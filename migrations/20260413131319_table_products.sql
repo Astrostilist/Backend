@@ -49,13 +49,3 @@ DROP INDEX IF EXISTS  idx_products_category;
 
 DROP TABLE IF EXISTS products;
 
-
-
--- CREATE TABLE IF NOT EXISTS products (
--- -    sku TEXT PRIMARY KEY,   =>  ext_product_id
--- -    name TEXT NOT NULL,     =>  title
--- V    description TEXT,
--- +    price DECIMAL(10,2) NOT NULL,
--- +    tags JSONB,
---     category TEXT
--- );

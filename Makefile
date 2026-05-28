@@ -80,13 +80,13 @@ clean: ## remove build artifacts and caches
 
 # ---- tests -----------------------------------------------------------
 test: ## unit tests (without -race, fast)
-	go test ./... -count=1
+	go test -short ./... -count=1
 
 test-race: ## unit tests with race detector
 	go test -race -count=1 ./...
 
 test-integration: ## integration tests (requires Docker)
-	go test -tags=integration -count=1 ./...
+	go test -count=1 ./...
 
 cover: ## tests + coverage summary
 	go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
