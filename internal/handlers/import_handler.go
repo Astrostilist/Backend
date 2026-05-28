@@ -6,12 +6,10 @@ import (
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
 )
 
 type AdminImportHandler struct {
 	repository importer.Repository
-	logger     *zap.Logger
 }
 
 func NewAdminImportHandler(repository importer.Repository) *AdminImportHandler {
@@ -35,21 +33,18 @@ func (h *AdminImportHandler) StartImport(w http.ResponseWriter, r *http.Request)
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "missing file field: "+err.Error())
-		//http.Error(w, "missing file field", http.StatusBadRequest)
 		return
 	}
 
 	defer func() {
 		if cerr := file.Close(); cerr != nil {
 			writeError(w, http.StatusInternalServerError, "failed to close file: "+err.Error())
-			// http.Error(w, "failed to close file", http.StatusInternalServerError)
 		}
 	}()
 
 	result, err := h.repository.RunImportCSV(r.Context(), file)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "import failed:: "+err.Error())
-		// http.Error(w, "import failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
