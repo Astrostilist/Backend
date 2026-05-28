@@ -150,7 +150,7 @@ func parseAndValidateCatalog(record []string, rowNum int) (*models.CatalogProduc
 
 	img := record[1]
 	images := strings.Split(img, ";")
-	var validImg []string
+	validImg := []string{}
 	for _, rowStr := range images {
 		_, err := url.Parse(rowStr)
 		if err != nil {
