@@ -87,8 +87,10 @@ func (r *JetStreamAdapter) InitializeStreams(ctx context.Context) error {
 func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 	streamsCfg := []jetstream.StreamConfig{
 		{
-			Name:         models.MsgStreamEvents,
-			Retention:    jetstream.WorkQueuePolicy,
+			Name: models.MsgStreamEvents,
+			// на проде стрим создался с InterestPolicy,
+			// при 1 консьюмере нет разницы, приведем код к состоянию прода
+			Retention:    jetstream.InterestPolicy, // jetstream.WorkQueuePolicy
 			Subjects:     []string{"astro.events.>"},
 			MaxConsumers: -1,
 			MaxMsgs:      -1,
@@ -150,7 +152,7 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 
 	consumersCfg := []jetstream.ConsumerConfig{
 		{
-			Name: models.MsgProfileWrk,
+			Name:              models.MsgProfileWrk,
 			FilterSubjects:    []string{models.MsgProfileSubj, fmt.Sprint(models.MsgProfileSubj, ".>")},
 			AckPolicy:         jetstream.AckExplicitPolicy,
 			ReplayPolicy:      jetstream.ReplayInstantPolicy,
