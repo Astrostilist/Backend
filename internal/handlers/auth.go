@@ -188,6 +188,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	err = revokeAllUserTokens(h.cache, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cache invalidation error")
+		return
 	}
 	// Гененрируем новый токен
 	jti := uuid.New().String()

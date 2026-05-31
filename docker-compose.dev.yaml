@@ -94,7 +94,8 @@ services:
       # Docker-compose сам подхватит .env, если он есть в той же папке
       - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-astrobackend}?sslmode=disable
       - NATS_URL=nats://nats:4222
-      - NATS_HOST=nats 
+      - NATS_HOST=nats
+      - MEMCACHED_HOST=memcached:11211
       - JAEGER_AGENT_HOST=jaeger
       - JAEGER_AGENT_PORT=6831
     depends_on:
