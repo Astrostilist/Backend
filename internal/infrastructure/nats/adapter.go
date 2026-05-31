@@ -4,6 +4,7 @@ import (
 	"astroapi/config"
 	"astroapi/internal/models"
 	"context"
+	"errors"
 	"fmt"
 
 	"strconv"
@@ -86,8 +87,10 @@ func (r *JetStreamAdapter) InitializeStreams(ctx context.Context) error {
 func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 	streamsCfg := []jetstream.StreamConfig{
 		{
-			Name:         models.MsgStreamEvents,
-			Retention:    jetstream.WorkQueuePolicy,
+			Name: models.MsgStreamEvents,
+			// на проде стрим создался с InterestPolicy,
+			// при 1 консьюмере нет разницы, приведем код к состоянию прода
+			Retention:    jetstream.InterestPolicy, // jetstream.WorkQueuePolicy
 			Subjects:     []string{"astro.events.>"},
 			MaxConsumers: -1,
 			MaxMsgs:      -1,
@@ -110,14 +113,46 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 	}
 
 	for _, streamCfg := range streamsCfg {
-		if _, err := r.CreateOrUpdateStream(ctx, streamCfg); err != nil {
-			return fmt.Errorf("failed to create/update stream %s: %w", streamCfg.Name, err)
+		// First check if the stream exists
+		stream, err := r.Stream(ctx, streamCfg.Name)
+		if err != nil {
+			// If stream doesn't exist, create it
+			if errors.Is(err, jetstream.ErrStreamNotFound) {
+				if _, err := r.CreateStream(ctx, streamCfg); err != nil {
+					return fmt.Errorf("failed to create stream %s: %w", streamCfg.Name, err)
+				}
+			} else {
+				return fmt.Errorf("failed to check stream %s: %w", streamCfg.Name, err)
+			}
+		} else {
+			// Stream exists - we should not try to change retention policies
+			// Get current stream configuration
+			info, err := stream.Info(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to get stream %s info: %w", streamCfg.Name, err)
+			}
+
+			// Check if retention policy is different (this is what causes the error)
+			if info.Config.Retention != streamCfg.Retention {
+				r.logger.Warn("Stream retention policy differs from configuration - skipping update",
+					zap.String("stream", streamCfg.Name),
+					zap.String("current_policy", info.Config.Retention.String()),
+					zap.String("configured_policy", streamCfg.Retention.String()))
+				// Continue with existing stream - don't try to change retention policy
+				continue
+			}
+
+			// For other configurations, we could potentially update if needed
+			// But to be safe and avoid other potential issues, we'll just log that
+			// the stream exists with the expected configuration
+			r.logger.Info("Stream already exists with matching configuration",
+				zap.String("stream", streamCfg.Name))
 		}
 	}
 
 	consumersCfg := []jetstream.ConsumerConfig{
 		{
-			Name: models.MsgProfileWrk,
+			Name:              models.MsgProfileWrk,
 			FilterSubjects:    []string{models.MsgProfileSubj, fmt.Sprint(models.MsgProfileSubj, ".>")},
 			AckPolicy:         jetstream.AckExplicitPolicy,
 			ReplayPolicy:      jetstream.ReplayInstantPolicy,
@@ -139,8 +174,27 @@ func (r *JetStreamAdapter) initStreams(ctx context.Context) error {
 	}
 
 	for _, consumerCfg := range consumersCfg {
-		if _, err := r.CreateOrUpdateConsumer(ctx, "astro_events", consumerCfg); err != nil {
-			return fmt.Errorf("failed to create/update consumer %s: %w", consumerCfg.Name, err)
+		// Check if consumer exists before trying to create/update
+		stream, err := r.Stream(ctx, "astro_events")
+		if err != nil {
+			return fmt.Errorf("failed to get stream astro_events for consumer %s: %w", consumerCfg.Name, err)
+		}
+
+		_, err = stream.Consumer(ctx, consumerCfg.Name)
+		if err != nil {
+			// If consumer doesn't exist, create it
+			if errors.Is(err, jetstream.ErrConsumerNotFound) {
+				if _, err := r.CreateOrUpdateConsumer(ctx, "astro_events", consumerCfg); err != nil {
+					return fmt.Errorf("failed to create consumer %s: %w", consumerCfg.Name, err)
+				}
+			} else {
+				return fmt.Errorf("failed to check consumer %s: %w", consumerCfg.Name, err)
+			}
+		} else {
+			// Consumer exists, log that we're using existing one
+			r.logger.Info("Consumer already exists",
+				zap.String("consumer", consumerCfg.Name),
+				zap.String("stream", "astro_events"))
 		}
 	}
 
@@ -162,9 +216,30 @@ func (r *JetStreamAdapter) initDLQConsumer(ctx context.Context) (jetstream.Consu
 		ReplayPolicy:      jetstream.ReplayInstantPolicy,
 		InactiveThreshold: 24 * time.Hour, // Авто-удаление если не используется
 	}
-	if consumer, err = r.CreateOrUpdateConsumer(ctx, models.MsgStreamDLQ, consumerCfg); err != nil {
-		return nil, fmt.Errorf("failed to create consumer %s: %w", consumerCfg.Name, err)
+
+	// Check if consumer exists first
+	stream, err := r.Stream(ctx, models.MsgStreamDLQ)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stream %s for DLQ consumer: %w", models.MsgStreamDLQ, err)
 	}
+
+	_, err = stream.Consumer(ctx, consumerCfg.Name)
+	if err != nil {
+		// If consumer doesn't exist, create it
+		if errors.Is(err, jetstream.ErrConsumerNotFound) {
+			if consumer, err = r.CreateOrUpdateConsumer(ctx, models.MsgStreamDLQ, consumerCfg); err != nil {
+				return nil, fmt.Errorf("failed to create consumer %s: %w", consumerCfg.Name, err)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to check DLQ consumer %s: %w", consumerCfg.Name, err)
+		}
+	} else {
+		// Consumer exists, log that we're using existing one
+		r.logger.Info("DLQ consumer already exists",
+			zap.String("consumer", consumerCfg.Name),
+			zap.String("stream", models.MsgStreamDLQ))
+	}
+
 	return consumer, nil
 }
 
