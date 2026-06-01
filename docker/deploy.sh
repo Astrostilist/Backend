@@ -18,5 +18,8 @@ docker compose --project-name "$project_name" -f "$compose_file" up -d --remove-
 # Статус для диагностики.
 docker compose --project-name "$project_name" -f "$compose_file" ps
 
+# Создание супер-пользовтеля
+docker compose --project-name "$project_name" -f "$compose_file" exec app /app/astro-backend-superadmin
+
 # Почистить висячие образы после успешного релиза.
 docker image prune -f
