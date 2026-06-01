@@ -10,6 +10,7 @@ import (
 	"astroapi/internal/products"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,15 +30,17 @@ func TestPostgresRepositoryListFiltersByCategory(t *testing.T) {
 	defer db.Close()
 
 	now := time.Now().UTC()
-	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM products\s+WHERE`).
-		WithArgs("rings", nil).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
 	rows := sqlmock.NewRows([]string{
-		"ext_product_id", "title", "price", "tags", "category", "created_at", "updated_at",
-	}).AddRow("sku-1", "Silver ring", 2500.0, []byte(`["silver"]`), "rings", now, now)
+		"count", "sku", "ext_product_id", "title", "price", "article",
+		"tags", "category", "url", "images", "rating", "created_at", "updated_at",
+	}).AddRow(
+		1,
+		"sku-1", "1", "Silver ring", 2500.0, "art-1",
+		[]byte(`["silver"]`), "rings", "https://example.com",
+		pq.Array([]string{"https://example.com/img.jpg"}), 4.5, now, now)
 
-	mock.ExpectQuery(`SELECT ext_product_id, title, price, tags, category, created_at, updated_at\s+FROM products\s+WHERE`).
+	mock.ExpectQuery(`SELECT COUNT\(\*\) OVER\(\), sku, ext_product_id, title, price, article, tags, category, url, images, rating, created_at, updated_at FROM products WHERE \(\$1 = '' OR category ILIKE '%' || $1 || '%'\) AND \(\$2::jsonb IS NULL OR tags @> $2::jsonb\) ORDER BY created_at DESC LIMIT $3 OFFSET $4`).
 		WithArgs("rings", nil, 10, 0).
 		WillReturnRows(rows)
 

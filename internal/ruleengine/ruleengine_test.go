@@ -1,5 +1,3 @@
-//go:build integration
-
 package ruleengine
 
 import (
@@ -19,6 +17,9 @@ import (
 )
 
 func TestMatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 	tests := []struct {
 		name     string
 		triggers []string

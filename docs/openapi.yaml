@@ -371,7 +371,8 @@ paths:
 
   /api/v1/admin/products:
     get:
-      summary: List products
+      summary: Перечень товаров
+      tags: [Admin — Products]
       security:
         - bearerAuth: []
       parameters:
@@ -418,7 +419,8 @@ paths:
 
   /api/v1/admin/products/{sku}:
     get:
-      summary: Get product by SKU
+      summary: Получение товара по SKU
+      tags: [Admin — Products]
       security:
         - bearerAuth: []
       parameters:
@@ -439,7 +441,8 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
     patch:
-      summary: Partially update product tags and price
+      summary:  'Частично обновить: теги продукта и цену ИЛИ теги продукта ИЛИ цену'
+      tags: [Admin — Products]
       security:
         - bearerAuth: []
       parameters:
@@ -660,13 +663,23 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Envelope"
+            type: object
+            properties:
+              message:
+                type: string
+              error:
+                type: string
     Unauthorized:
       description: Отсутствует или невалидный токен
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Envelope"
+            type: object
+            properties:
+              message:
+                type: string
+              error:
+                type: string
     InternalServerErr:
       description: Internal server error
       content:
@@ -926,14 +939,20 @@ components:
       type: object
       required:
         - sku
+        - ext_product_id
         - name
         - price
         - tags
         - category
+        - images
+        - url
+        - article
         - created_at
         - updated_at
       properties:
         sku:
+          type: string
+        ext_product_id:
           type: string
         name:
           type: string
@@ -946,6 +965,14 @@ components:
           items:
             type: string
         category:
+          type: string
+        images:
+          type: array
+          items:
+            type: string
+        url:
+          type: string
+        article:
           type: string
         created_at:
           type: string
@@ -991,17 +1018,19 @@ components:
           minimum: 0
     AdminProductEnvelope:
       allOf:
-        - $ref: "#/components/schemas/Envelope"
         - type: object
           properties:
+            message:
+              type: string
             data:
               $ref: "#/components/schemas/AdminProduct"
 
     AdminProductsListEnvelope:
       allOf:
-        - $ref: "#/components/schemas/Envelope"
         - type: object
           properties:
+            message:
+              type: string
             data:
               type: object
               properties:

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"astroapi/internal/models"
 	"astroapi/internal/products"
 
 	"github.com/bradfitz/gomemcache/memcache"
@@ -28,8 +29,8 @@ type AdminProductsHandler struct {
 }
 
 type adminProductsListResponse struct {
-	Items    []products.Product `json:"items"`
-	Metadata paginationMetadata `json:"metadata"`
+	Items    []models.CatalogProduct `json:"items"`
+	Metadata paginationMetadata      `json:"metadata"`
 }
 
 type paginationMetadata struct {
@@ -197,6 +198,7 @@ func (r adminProductPatchRequest) toPatchInput() (products.PatchInput, bool, err
 	return input, tagsChanged, nil
 }
 
+// parseProductsListOptions - парсинг query-параметров.
 func parseProductsListOptions(r *http.Request) (products.ListOptions, int, int, error) {
 	query := r.URL.Query()
 

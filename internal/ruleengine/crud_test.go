@@ -1,5 +1,3 @@
-//go:build integration
-
 package ruleengine
 
 import (
@@ -24,9 +22,9 @@ func TestCreate(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		input     RuleInput
-		want_uuid bool
+		name     string
+		input    RuleInput
+		wantUUID bool
 		// want      Rule
 	}{
 		{
@@ -41,7 +39,7 @@ func TestCreate(t *testing.T) {
 				Priority:    5,
 				IsActive:    true,
 			},
-			want_uuid: true,
+			wantUUID: true,
 		},
 		{
 			name: "positive -  create & delete a rule",
@@ -56,7 +54,7 @@ func TestCreate(t *testing.T) {
 				Priority:    2,
 				IsActive:    true,
 			},
-			want_uuid: true,
+			wantUUID: true,
 		},
 	}
 
@@ -360,8 +358,8 @@ func TestList(t *testing.T) {
 			},
 			opt: ListOptions{
 				IsActive: func(b bool) *bool { return &b }(true),
-				PageSize: 10,
-				Page:     1,
+				PageSize: 2,
+				Page:     2,
 			},
 			wantList: []RuleInput{
 				{
@@ -443,6 +441,10 @@ func TestList(t *testing.T) {
 				createdID, err := rules.Create(ctx, &elem)
 				require.NoError(t, err)
 				listID = append(listID, createdID)
+			}
+
+			if len(listID) == 0 {
+				require.NoError(t, err)
 			}
 
 			dbRules, mtdata, err := rules.List(ctx, tt.opt)
@@ -582,9 +584,9 @@ func TestDelete(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		input     RuleInput
-		want_uuid bool
+		name     string
+		input    RuleInput
+		wantUUID bool
 		// want      Rule
 	}{
 		{
@@ -599,7 +601,7 @@ func TestDelete(t *testing.T) {
 				Priority:    5,
 				IsActive:    true,
 			},
-			want_uuid: true,
+			wantUUID: true,
 		},
 	}
 
@@ -677,6 +679,9 @@ func TestDelete(t *testing.T) {
 }
 
 func TestCreateAndMatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 	tests := []struct {
 		name          string
 		input         []RuleInput
