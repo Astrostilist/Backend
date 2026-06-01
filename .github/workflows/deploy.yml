@@ -90,6 +90,9 @@ jobs:
           CI_DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           CI_POSTGRES_PASSWORD: ${{ secrets.DB_PASSWORD }}
           CI_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          CI_SUPERADMIN_EMAIL: ${{ secrets.SUPERADMIN_EMAIL }}
+          CI_SUPERADMIN_PASSWORD: ${{ secrets.SUPERADMIN_PASSWORD }}
+          CI_SECRET_TOKEN_ADMIN: ${{ secrets.SECRET_TOKEN_ADMIN }}
         run: |
           set -euo pipefail
           pip3 install dump-env
