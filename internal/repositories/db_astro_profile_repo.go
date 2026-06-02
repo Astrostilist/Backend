@@ -1,0 +1,103 @@
+package repositories
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"go.opentelemetry.io/otel"
+
+	"astroapi/internal/crypto"
+	"astroapi/internal/repositories/domain"
+)
+
+type dbAstroProfileRepo struct {
+	db  *sql.DB
+	key []byte
+}
+
+func NewDbAstroProfileRepo(db *sql.DB, encryptionKey []byte) *dbAstroProfileRepo {
+	return &dbAstroProfileRepo{
+		db:  db,
+		key: encryptionKey,
+	}
+}
+
+func (r *dbAstroProfileRepo) Save(ctx context.Context, profile domain.AstroProfile) error {
+	tracer := otel.Tracer("db-astro-profile-repo")
+	repoctx, repoSpan := tracer.Start(ctx, "astro-profile.Save")
+	defer repoSpan.End()
+
+	encryptedDob, err := crypto.Encrypt(profile.DOB, r.key)
+	if err != nil {
+		err = fmt.Errorf("data encryption failed: %w", err)
+		repoSpan.RecordError(err)
+		return err
+	}
+
+	now := time.Now()
+	query := `INSERT INTO astro_profile (id, user_id, profile_hash, encrypted_dob, consent_given, created_at, updated_at)
+              VALUES ($1, $2, $3, $4, $5, $6, $7)
+              ON CONFLICT (user_id) DO UPDATE SET
+			  profile_hash = EXCLUDED.profile_hash,
+              encrypted_dob = EXCLUDED.encrypted_dob,
+              updated_at = EXCLUDED.updated_at;`
+	_, err = r.db.ExecContext(repoctx, query, profile.ID, profile.UserID, profile.ProfileHash, encryptedDob, profile.ConsentGiven, now, now)
+	if err != nil {
+		err := fmt.Errorf("error adding data to the astro_profile table: %w", err)
+		repoSpan.RecordError(err)
+		return err
+	}
+
+	return nil
+}
+
+func (r *dbAstroProfileRepo) ReceivingByHash(ctx context.Context, hash string) (*domain.AstroProfile, error) {
+	tracer := otel.Tracer("db-astro-profile-repo")
+	repoctx, repoSpan := tracer.Start(ctx, "astro-profile.ReceivingByHas")
+	defer repoSpan.End()
+
+	if hash == "" {
+		err := errors.New("profile hash must not be empty")
+		repoSpan.RecordError(err)
+		return nil, err
+	}
+	query := `SELECT id, user_id, profile_hash, encrypted_dob, consent_given 
+	          FROM astro_profile 
+			  WHERE profile_hash = $1`
+	rows, err := r.db.QueryContext(repoctx, query, hash)
+	if err != nil {
+		err := fmt.Errorf("error creating request: %w", err)
+		repoSpan.RecordError(err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var p *domain.AstroProfile
+	var encryptedDob []byte
+	if rows.Next() {
+		p = &domain.AstroProfile{}
+		err := rows.Scan(&p.ID, &p.UserID, &p.ProfileHash, &encryptedDob, &p.ConsentGiven)
+		if err != nil {
+			err := fmt.Errorf("data scanning error: %w", err)
+			repoSpan.RecordError(err)
+			return nil, err
+		}
+		p.DOB, err = crypto.Decrypt(encryptedDob, r.key)
+		if err != nil {
+			err := fmt.Errorf("data decryption error: %w", err)
+			repoSpan.RecordError(err)
+			return nil, err
+		}
+
+	}
+	if err := rows.Err(); err != nil {
+		err := fmt.Errorf("error while iterating over rows: %w", err)
+		repoSpan.RecordError(err)
+		return nil, err
+	}
+
+	return p, nil
+}

@@ -5,3 +5,11 @@ type PersonalData struct {
 	DOB          string
 	ConsentGiven bool
 }
+
+type AstroProfile struct {
+	ID           string
+	UserID       string
+	ProfileHash  string
+	DOB          string
+	ConsentGiven bool
+}
