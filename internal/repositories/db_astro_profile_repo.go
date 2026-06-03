@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -37,14 +38,21 @@ func (r *dbAstroProfileRepo) Save(ctx context.Context, profile domain.AstroProfi
 		return err
 	}
 
+	profileDataJSON, err := json.Marshal(profile.ProfileData)
+	if err != nil {
+		err = fmt.Errorf("failed to marshal profile data: %w", err)
+		repoSpan.RecordError(err)
+		return err
+	}
+
 	now := time.Now()
-	query := `INSERT INTO astro_profile (id, user_id, profile_hash, encrypted_dob, consent_given, created_at, updated_at)
+	query := `INSERT INTO astro_profiles (id, user_id, profile_hash, dob_encrypted, consent_given, profile_data, created_at)
               VALUES ($1, $2, $3, $4, $5, $6, $7)
-              ON CONFLICT (user_id) DO UPDATE SET
-			  profile_hash = EXCLUDED.profile_hash,
-              encrypted_dob = EXCLUDED.encrypted_dob,
-              updated_at = EXCLUDED.updated_at;`
-	_, err = r.db.ExecContext(repoctx, query, profile.ID, profile.UserID, profile.ProfileHash, encryptedDob, profile.ConsentGiven, now, now)
+              ON CONFLICT (user_id, profile_hash) DO UPDATE SET
+              dob_encrypted = EXCLUDED.dob_encrypted,
+              consent_given = EXCLUDED.consent_given,
+              profile_data = EXCLUDED.profile_data;`
+	_, err = r.db.ExecContext(repoctx, query, profile.ID, profile.UserID, profile.ProfileHash, encryptedDob, profile.ConsentGiven, profileDataJSON, now)
 	if err != nil {
 		err := fmt.Errorf("error adding data to the astro_profile table: %w", err)
 		repoSpan.RecordError(err)
@@ -64,8 +72,8 @@ func (r *dbAstroProfileRepo) ReceivingByHash(ctx context.Context, hash string) (
 		repoSpan.RecordError(err)
 		return nil, err
 	}
-	query := `SELECT id, user_id, profile_hash, encrypted_dob, consent_given 
-	          FROM astro_profile 
+	query := `SELECT id, user_id, profile_hash, dob_encrypted, consent_given, profile_data
+	          FROM astro_profiles
 			  WHERE profile_hash = $1`
 	rows, err := r.db.QueryContext(repoctx, query, hash)
 	if err != nil {
@@ -79,7 +87,8 @@ func (r *dbAstroProfileRepo) ReceivingByHash(ctx context.Context, hash string) (
 	var encryptedDob []byte
 	if rows.Next() {
 		p = &domain.AstroProfile{}
-		err := rows.Scan(&p.ID, &p.UserID, &p.ProfileHash, &encryptedDob, &p.ConsentGiven)
+		var profileDataJSON []byte
+		err := rows.Scan(&p.ID, &p.UserID, &p.ProfileHash, &encryptedDob, &p.ConsentGiven, &profileDataJSON)
 		if err != nil {
 			err := fmt.Errorf("data scanning error: %w", err)
 			repoSpan.RecordError(err)
@@ -91,7 +100,11 @@ func (r *dbAstroProfileRepo) ReceivingByHash(ctx context.Context, hash string) (
 			repoSpan.RecordError(err)
 			return nil, err
 		}
-
+		if err = json.Unmarshal(profileDataJSON, &p.ProfileData); err != nil {
+			err = fmt.Errorf("failed to unmarshal profile data: %w", err)
+			repoSpan.RecordError(err)
+			return nil, err
+		}
 	}
 	if err := rows.Err(); err != nil {
 		err := fmt.Errorf("error while iterating over rows: %w", err)
