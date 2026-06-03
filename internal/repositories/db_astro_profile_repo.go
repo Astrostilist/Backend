@@ -19,7 +19,7 @@ type dbAstroProfileRepo struct {
 	key []byte
 }
 
-func NewDbAstroProfileRepo(db *sql.DB, encryptionKey []byte) *dbAstroProfileRepo {
+func NewDbAstroProfileRepo(db *sql.DB, encryptionKey []byte) AstroProfileRepository {
 	return &dbAstroProfileRepo{
 		db:  db,
 		key: encryptionKey,
@@ -62,7 +62,7 @@ func (r *dbAstroProfileRepo) Save(ctx context.Context, profile domain.AstroProfi
 	return nil
 }
 
-func (r *dbAstroProfileRepo) ReceivingByHash(ctx context.Context, hash string) (*domain.AstroProfile, error) {
+func (r *dbAstroProfileRepo) ReceivingByHash(ctx context.Context, hash string) (_ *domain.AstroProfile, retErr error) {
 	tracer := otel.Tracer("db-astro-profile-repo")
 	repoctx, repoSpan := tracer.Start(ctx, "astro-profile.ReceivingByHas")
 	defer repoSpan.End()
@@ -81,7 +81,12 @@ func (r *dbAstroProfileRepo) ReceivingByHash(ctx context.Context, hash string) (
 		repoSpan.RecordError(err)
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && retErr == nil {
+			retErr = fmt.Errorf("close rows: %w", closeErr)
+			repoSpan.RecordError(retErr)
+		}
+	}()
 
 	var p *domain.AstroProfile
 	var encryptedDob []byte

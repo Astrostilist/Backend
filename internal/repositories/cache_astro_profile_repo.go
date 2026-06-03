@@ -19,7 +19,7 @@ type cacheAstroProfileRepo struct {
 	ttl    int32
 }
 
-func NewCacheAstroProfileRepo(servers []string, ttl time.Duration) *cacheAstroProfileRepo {
+func NewCacheAstroProfileRepo(servers []string, ttl time.Duration) AstroProfileRepository {
 	return &cacheAstroProfileRepo{
 		client: memcache.New(servers...),
 		ttl:    int32(ttl.Seconds()),
