@@ -44,6 +44,12 @@ func (r *dbAstroProfileRepo) Save(ctx context.Context, profile domain.AstroProfi
 		repoSpan.RecordError(err)
 		return err
 	}
+	tx, err := r.db.BeginTx(repoctx, nil)
+	if err != nil {
+		err = fmt.Errorf("begin transaction: %w", err)
+		repoSpan.RecordError(err)
+		return err
+	}
 
 	now := time.Now()
 	query := `INSERT INTO astro_profiles (id, user_id, profile_hash, dob_encrypted, consent_given, profile_data, created_at)
@@ -52,19 +58,25 @@ func (r *dbAstroProfileRepo) Save(ctx context.Context, profile domain.AstroProfi
               dob_encrypted = EXCLUDED.dob_encrypted,
               consent_given = EXCLUDED.consent_given,
               profile_data = EXCLUDED.profile_data;`
-	_, err = r.db.ExecContext(repoctx, query, profile.ID, profile.UserID, profile.ProfileHash, encryptedDob, profile.ConsentGiven, profileDataJSON, now)
+
+	_, err = tx.ExecContext(repoctx, query, profile.ID, profile.UserID, profile.ProfileHash, encryptedDob, profile.ConsentGiven, profileDataJSON, now)
 	if err != nil {
+		_ = tx.Rollback()
 		err := fmt.Errorf("error adding data to the astro_profile table: %w", err)
 		repoSpan.RecordError(err)
 		return err
 	}
-
+	if err := tx.Commit(); err != nil {
+		err := fmt.Errorf("commit transaction: %w", err)
+		repoSpan.RecordError(err)
+		return err
+	}
 	return nil
 }
 
 func (r *dbAstroProfileRepo) ReceivingByHash(ctx context.Context, hash string) (_ *domain.AstroProfile, retErr error) {
 	tracer := otel.Tracer("db-astro-profile-repo")
-	repoctx, repoSpan := tracer.Start(ctx, "astro-profile.ReceivingByHas")
+	repoctx, repoSpan := tracer.Start(ctx, "astro-profile.ReceivingByHash")
 	defer repoSpan.End()
 
 	if hash == "" {

@@ -16,13 +16,13 @@ import (
 
 type cacheAstroProfileRepo struct {
 	client *memcache.Client
-	ttl    int32
+	ttl    time.Duration
 }
 
 func NewCacheAstroProfileRepo(servers []string, ttl time.Duration) AstroProfileRepository {
 	return &cacheAstroProfileRepo{
 		client: memcache.New(servers...),
-		ttl:    int32(ttl.Seconds()),
+		ttl:    ttl,
 	}
 }
 
@@ -47,7 +47,7 @@ func (r *cacheAstroProfileRepo) Save(ctx context.Context, profile domain.AstroPr
 	item := &memcache.Item{
 		Key:        key,
 		Value:      jsonData,
-		Expiration: r.ttl,
+		Expiration: int32(r.ttl.Seconds()),
 	}
 
 	if err := r.client.Set(item); err != nil {
@@ -67,7 +67,7 @@ func (r *cacheAstroProfileRepo) ReceivingByHash(ctx context.Context, hash string
 		repoSpan.RecordError(err)
 		return nil, err
 	}
-	key := "astro_profile:" + hash
+	key := fmt.Sprintf("astro_profile:%s", hash)
 
 	var p *domain.AstroProfile
 
