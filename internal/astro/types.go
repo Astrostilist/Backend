@@ -20,8 +20,10 @@ type DateOfBirth struct {
 // PlanetPosition is the normalized planet-in-sign format consumed by
 // rule matching, prompt building and astro_triggers logic.
 type PlanetPosition struct {
+	Id         string  `json:"id"`
 	Name       string  `json:"name"`
 	Sign       string  `json:"sign"`
+	SignId     string  `json:"sign_id"`
 	House      int     `json:"house,omitempty"`
 	Degree     float64 `json:"degree,omitempty"`
 	Retrograde bool    `json:"retrograde,omitempty"`
@@ -145,3 +147,33 @@ func russianSignPrepositionalNames() map[string]string {
 		"pisces":      "Рыбах",
 	}
 }
+
+// Planet IDs for the natal chart
+const (
+	SunID     = "sun"
+	MoonID    = "moon"
+	MercuryID = "mercury"
+	VenusID   = "venus"
+	MarsID    = "mars"
+	JupiterID = "jupiter"
+	SaturnID  = "saturn"
+	UranusID  = "uranus"
+	NeptuneID = "neptune"
+	PlutoID   = "pluto"
+)
+
+// Zodiac Sign IDs for the natal chart
+const (
+	AriesID       = "aries"
+	TaurusID      = "taurus"
+	GeminiID      = "gemini"
+	CancerID      = "cancer"
+	LeoID         = "leo"
+	VirgoID       = "virgo"
+	LibraID       = "libra"
+	ScorpioID     = "scorpio"
+	SagittariusID = "sagittarius"
+	CapricornID   = "capricorn"
+	AquariusID    = "aquarius"
+	PiscesID      = "pisces"
+)

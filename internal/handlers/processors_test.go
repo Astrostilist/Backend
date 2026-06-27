@@ -6,7 +6,6 @@ import (
 	"errors"
 	"testing"
 
-	almocks "astroapi/internal/alisa/mocks"
 	"astroapi/internal/astro"
 	"astroapi/internal/handlers"
 	handlermocks "astroapi/internal/handlers/mocks"
@@ -104,7 +103,6 @@ func TestRecommendProcessor_HappyPath(t *testing.T) {
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
 	rulesRepo := rulemocks.NewMockRepository(ctrl)
-	ai := almocks.NewMockGenerator(ctrl)
 	astroProvider := handlermocks.NewMockAstroProvider(ctrl)
 
 	reqRepo.EXPECT().Get(gomock.Any(), "req-2").Return(requests.Request{RequestID: "req-2", Status: requests.StatusPending}, nil).Times(1)
@@ -112,10 +110,9 @@ func TestRecommendProcessor_HappyPath(t *testing.T) {
 	userRepo.EXPECT().Get(gomock.Any(), validUserID).Return(user.User{UserID: validUserID, BirthDate: "1990-01-01"}, nil).Times(1)
 	astroProvider.EXPECT().GetNatalChart(gomock.Any(), gomock.Any(), 55.75, 37.61).Return(testNatalData(), nil).Times(1)
 	rulesRepo.EXPECT().Match(gomock.Any(), gomock.Any()).Return([]string{"luxury"}, nil).Times(1)
-	ai.EXPECT().Generate(gomock.Any(), gomock.Any()).Return("awesome", nil).Times(1)
 	reqRepo.EXPECT().UpdateStatus(gomock.Any(), "req-2", requests.StatusCompleted, gomock.Any(), "").Return(nil).Times(1)
 
-	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, astroProvider, zap.NewNop())
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, astroProvider, zap.NewNop())
 	payload := wrapWithTrace(map[string]any{
 		"request_id": "req-2",
 		"recommend": map[string]any{
@@ -137,11 +134,10 @@ func TestRecommendProcessor_DuplicateCompletedIsSkipped(t *testing.T) {
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
 	rulesRepo := rulemocks.NewMockRepository(ctrl)
-	ai := almocks.NewMockGenerator(ctrl)
 	astroProvider := handlermocks.NewMockAstroProvider(ctrl)
 
 	reqRepo.EXPECT().Get(gomock.Any(), "req-dup").Return(requests.Request{RequestID: "req-dup", Status: requests.StatusCompleted, Result: []byte(`{"ok":true}`)}, nil).Times(1)
-	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, astroProvider, zap.NewNop())
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, astroProvider, zap.NewNop())
 	payload := wrapWithTrace(map[string]any{
 		"request_id": "req-dup",
 		"recommend":  map[string]any{"user_id": validUserID, "scenario": "personal_style"},
@@ -155,7 +151,6 @@ func TestRecommendProcessor_MissingCoordinatesReturnsValidationError(t *testing.
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
 	rulesRepo := rulemocks.NewMockRepository(ctrl)
-	ai := almocks.NewMockGenerator(ctrl)
 	astroProvider := handlermocks.NewMockAstroProvider(ctrl)
 
 	reqRepo.EXPECT().Get(gomock.Any(), "req-missing").Return(requests.Request{RequestID: "req-missing", Status: requests.StatusPending}, nil).Times(2)
@@ -163,7 +158,7 @@ func TestRecommendProcessor_MissingCoordinatesReturnsValidationError(t *testing.
 	userRepo.EXPECT().Get(gomock.Any(), validUserID).Return(user.User{UserID: validUserID, BirthDate: "1990-01-01"}, nil).Times(1)
 	reqRepo.EXPECT().UpdateStatus(gomock.Any(), "req-missing", requests.StatusRetry, gomock.Nil(), gomock.Any()).Return(nil).Times(1)
 
-	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, astroProvider, zap.NewNop())
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, astroProvider, zap.NewNop())
 	payload := wrapWithTrace(map[string]any{
 		"request_id": "req-missing",
 		"recommend":  map[string]any{"user_id": validUserID, "scenario": "personal_style"},
@@ -179,7 +174,6 @@ func TestRecommendProcessor_FifthFailureMarksFailed(t *testing.T) {
 	userRepo := usermocks.NewMockRepository(ctrl)
 	reqRepo := reqmocks.NewMockRepository(ctrl)
 	rulesRepo := rulemocks.NewMockRepository(ctrl)
-	ai := almocks.NewMockGenerator(ctrl)
 	astroProvider := handlermocks.NewMockAstroProvider(ctrl)
 
 	workerErr := errors.New("user repo unavailable")
@@ -188,7 +182,7 @@ func TestRecommendProcessor_FifthFailureMarksFailed(t *testing.T) {
 	userRepo.EXPECT().Get(gomock.Any(), validUserID).Return(user.User{}, workerErr).Times(1)
 	reqRepo.EXPECT().UpdateStatus(gomock.Any(), "req-last", requests.StatusFailed, gomock.Nil(), gomock.Any()).Return(nil).Times(1)
 
-	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, astroProvider, zap.NewNop())
+	p := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, astroProvider, zap.NewNop())
 	payload := wrapWithTrace(map[string]any{
 		"request_id": "req-last",
 		"recommend":  map[string]any{"user_id": validUserID, "scenario": "personal_style"},

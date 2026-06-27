@@ -17,8 +17,8 @@ import (
 	"astroapi/config"
 	"astroapi/internal/admin"
 	"astroapi/internal/adminlogs"
-	"astroapi/internal/alisa"
 	"astroapi/internal/astro"
+	"astroapi/internal/clients/retailcrm"
 	"astroapi/internal/database"
 	"astroapi/internal/handlers"
 	"astroapi/internal/importer"
@@ -146,8 +146,11 @@ func run() error {
 	adminRepo := admin.NewPostgresRepository(db.DB)
 
 	dbRepo := repositories.NewDBPersonalDataRepository(db.DB, encryptionKey)
-	cacheRepo := repositories.NewCacheRepo(cacheTTL, []string{cfg.MemcachedHost})
+	cacheRepo := repositories.NewCacheRepo([]string{cfg.MemcachedHost}, cacheTTL)
 	personalDataUC := usecases.NewProcessPersonalDataUseCase(dbRepo, cacheRepo)
+	astroDb := repositories.NewDbAstroProfileRepo(db.DB, encryptionKey)
+	astroCache := repositories.NewCacheAstroProfileRepo([]string{cfg.MemcachedHost}, cacheTTL)
+	astroProfileUC := usecases.NewProcessAstroProfileUseCase(astroDb, astroCache)
 
 	userRepositoryDelete := repositories.NewUserRepository(db.DB)
 	h := &handlers.Handler{
@@ -158,24 +161,15 @@ func run() error {
 	healthRepo := health.NewHealthServiceRepo(db, natsConn)
 	monitor := infra.NewMonitorService(jsAdapter, healthRepo, zapLogger)
 
-	aiClient := alisa.NewClientWithOptions(
-		cfg.AIBaseURL,
-		cfg.AIAPIKey,
-		cfg.AIModelURL,
-		alisa.ClientOptions{
-			Logger:     zapLogger,
-			Metrics:    metricsReporter,
-			MaxRetries: 3,
-		},
-	)
-
 	astroClient, err := astro.NewClientFromConfig(cfg, js, zapLogger, metricsReporter)
 	if err != nil {
 		return fmt.Errorf("failed to init astro provider: %w", err)
 	}
 
-	profileProcessor := handlers.NewProfileProcessor(userRepo, requestsRepo, astroClient, zapLogger)
-	recommendProcessor := handlers.NewRecommendProcessor(userRepo, requestsRepo, rulesRepo, aiClient, astroClient, zapLogger)
+	crmClient := retailcrm.NewClient(cfg.CRMBaseUrl, cfg.CRMApiKey)
+
+	profileProcessor := handlers.NewProfileProcessor(astroProfileUC, requestsRepo, astroClient, crmClient, zapLogger)
+	recommendProcessor := handlers.NewRecommendProcessor(astroProfileUC, requestsRepo, rulesRepo, astroClient, crmClient, zapLogger)
 
 	msgRouter := handlers.NewMsgRouter(zapLogger)
 	msgRouter.Register(models.MsgProfileSubj, profileProcessor)
@@ -222,7 +216,7 @@ func run() error {
 	helloHandler := handlers.NewHelloHandler(handlers.NewRealHelloService(db))
 	healthHandler := handlers.NewHealthHandler(healthRepo)
 	profileHandler := handlers.NewProfileHandler(publisher, requestsRepo, personalDataUC, zapLogger)
-	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, aiClient, astroClient, requestsRepo, zapLogger)
+	recommendHandler := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, astroClient, requestsRepo, zapLogger)
 	adminRulesHandler := handlers.NewAdminRulesHandler(rulesRepo)
 	importerCsvHandler := handlers.NewAdminImportHandler(importerCsv)
 	adminProductsHandler := handlers.NewAdminProductsHandler(productsRepo, nil, zapLogger)

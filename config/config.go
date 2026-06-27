@@ -57,6 +57,10 @@ type Config struct {
 	AstroProvider string
 	AstroAPIURL   string
 	AstroAPIKey   string
+
+	// CRM
+	CRMBaseUrl string
+	CRMApiKey  string
 }
 
 // Load читает переменные окружения. .env-файл подхватывается один раз здесь,
@@ -108,6 +112,9 @@ func Load() *Config {
 		AstroProvider: getEnv("ASTRO_PROVIDER", "external"),
 		AstroAPIURL:   getEnv("ASTRO_API_URL", ""),
 		AstroAPIKey:   getEnv("ASTRO_API_KEY", getEnv("FREE_ASTRO_API_KEY", "")),
+
+		CRMBaseUrl: getEnv("CRM_BASE_URL", "https://iline-group.retailcrm.ru"),
+		CRMApiKey:  getEnv("CRM_API_KEY", "Ixr2gNhj2Xlzb6HKp3nHvwYBbjsZb6t8"),
 	}
 }
 

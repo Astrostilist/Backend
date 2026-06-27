@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"astroapi/config"
-	"astroapi/internal/alisa"
 	"astroapi/internal/astro"
 	"astroapi/internal/handlers"
 	natsinfra "astroapi/internal/infrastructure/nats"
@@ -267,7 +266,7 @@ func TestE2E_ProfilePipeline(t *testing.T) {
 }
 
 // TestE2E_RecommendPipeline: async POST /astro/recommend → NATS → RecommendProcessor
-// вызывает AI, пишет completed в результат генерации.
+// вызывает Astro, пишет completed в результат генерации.
 func TestE2E_RecommendPipeline(t *testing.T) {
 	host, port := startNATS(t)
 
@@ -295,10 +294,9 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 
 	reqRepo := newMemRequestsRepo()
 	rulesRepo := &memRulesRepo{tags: []string{"luxury"}}
-	ai := stubAI{reply: "e2e response"}
 
 	astroClient := stubAstroClient{natalData: testE2ENatalData()}
-	proc := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, ai, astroClient, logger)
+	proc := handlers.NewRecommendProcessor(userRepo, reqRepo, rulesRepo, astroClient, logger)
 	router := handlers.NewMsgRouter(logger)
 	router.Register(models.MsgRecommendSubj, proc)
 
@@ -308,7 +306,7 @@ func TestE2E_RecommendPipeline(t *testing.T) {
 			return router.Dispatch(c, msg.Subject(), msg.Data())
 		}))
 
-	h := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, ai, astroClient, reqRepo, logger)
+	h := handlers.NewRecommendHandler(publisher, userRepo, rulesRepo, astroClient, reqRepo, logger)
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -465,5 +463,4 @@ func testE2ENatalData() astro.NatalData {
 var (
 	_ handlers.RuleMatcher   = (*memRulesRepo)(nil)
 	_ handlers.AstroProvider = stubAstroClient{}
-	_ alisa.Generator        = stubAI{}
 )

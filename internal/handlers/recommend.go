@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"astroapi/internal/alisa"
 	astrologger "astroapi/internal/infrastructure/logger"
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
@@ -55,7 +54,6 @@ type RecommendHandler struct {
 	publisher     MsgPublisher
 	userRepo      user.Repository
 	rulesRepo     RuleMatcher
-	aiClient      alisa.Generator
 	astroProvider AstroProvider
 	requestsRepo  requests.Repository
 	logger        *zap.Logger
@@ -65,7 +63,6 @@ func NewRecommendHandler(
 	publisher MsgPublisher,
 	userRepo user.Repository,
 	rulesRepo RuleMatcher,
-	aiClient alisa.Generator,
 	astroProvider AstroProvider,
 	requestsRepo requests.Repository,
 	logger *zap.Logger,
@@ -74,7 +71,6 @@ func NewRecommendHandler(
 		publisher:     publisher,
 		userRepo:      userRepo,
 		rulesRepo:     rulesRepo,
-		aiClient:      aiClient,
 		astroProvider: astroProvider,
 		requestsRepo:  requestsRepo,
 		logger:        logger,

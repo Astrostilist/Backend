@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"astroapi/internal/alisa"
 	"astroapi/internal/astro"
 	astrologger "astroapi/internal/infrastructure/logger"
 	"astroapi/internal/models"
+	"astroapi/internal/repositories/domain"
 	"astroapi/internal/requests"
 	"astroapi/internal/user"
 
@@ -20,6 +21,34 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
 )
+
+var ZodiacMapping = map[string]string{
+	astro.AriesID:       domain.AriesID,
+	astro.TaurusID:      domain.TaurusID,
+	astro.GeminiID:      domain.GeminiID,
+	astro.CancerID:      domain.CancerID,
+	astro.LeoID:         domain.LeoID,
+	astro.VirgoID:       domain.VirgoID,
+	astro.LibraID:       domain.LibraID,
+	astro.ScorpioID:     domain.ScorpioID,
+	astro.SagittariusID: domain.SagittariusID,
+	astro.CapricornID:   domain.CapricornID,
+	astro.AquariusID:    domain.AquariusID,
+	astro.PiscesID:      domain.PiscesID,
+}
+
+var PlanetMapping = map[string]string{
+	astro.SunID:     domain.Sun,
+	astro.MoonID:    domain.Moon,
+	astro.MercuryID: domain.Mercury,
+	astro.VenusID:   domain.Venus,
+	astro.MarsID:    domain.Mars,
+	astro.JupiterID: domain.Jupiter,
+	astro.SaturnID:  domain.Saturn,
+	astro.UranusID:  domain.Uranus,
+	astro.NeptuneID: domain.Neptune,
+	astro.PlutoID:   domain.Pluto,
+}
 
 // RuleMatcher — узкий интерфейс: handlers нужны только триггеры → тэги.
 // Реализуется ruleengine.PostgresRepository (и моками в тестах).
@@ -46,7 +75,6 @@ func buildRecommendation(
 	req RecommendRequest,
 	userRepo user.Repository,
 	rulesRepo RuleMatcher,
-	ai alisa.Generator,
 	astroProvider AstroProvider,
 	logger *zap.Logger,
 ) (RecommendationResult, error) {
@@ -71,7 +99,8 @@ func buildRecommendation(
 		enrichedCtx[k] = v
 	}
 
-	prompt := alisa.BuildPrompt(req.Scenario, natalData, enrichedCtx, logger)
+	// TODO: search products
+	/*prompt := alisa.BuildPrompt(req.Scenario, natalData, enrichedCtx, logger)
 	if prompt == "" {
 		return RecommendationResult{}, fmt.Errorf("validation: cannot build prompt for scenario %q", req.Scenario)
 	}
@@ -81,7 +110,9 @@ func buildRecommendation(
 		return RecommendationResult{}, fmt.Errorf("ai generate: %w", err)
 	}
 
-	return RecommendationResult{Text: text, Tags: tags}, nil
+	return RecommendationResult{Text: text, Tags: tags}, nil*/
+	return RecommendationResult{}, nil
+
 }
 
 func buildNatalData(
@@ -330,18 +361,31 @@ func beginRequestProcessing(
 // ProfileProcessor обрабатывает сообщения astro.events.profile.
 // Воркер вызывает внешний Astro API, пишет результат в requests_log и завершает задачу.
 type ProfileProcessor struct {
+	astroRepo     AstroRepo
 	requestsRepo  requests.Repository
 	astroProvider AstroProvider
+	crmClient     CrmClient
 	logger        *zap.Logger
 }
 
+type AstroRepo interface {
+	ExecuteSave(ctx context.Context, profile domain.AstroProfile) error
+	ExecuteReceivingByHash(ctx context.Context, hash string) (*domain.AstroProfile, error)
+}
+
+type CrmClient interface {
+	SendProfile(ctx context.Context, profile domain.AstroProfile) error
+	SendRecommend(ctx context.Context, recommend string) error
+}
+
 func NewProfileProcessor(
-	_ user.Repository,
+	astroRepo AstroRepo,
 	requestsRepo requests.Repository,
 	astroProvider AstroProvider,
+	crmClient CrmClient,
 	logger *zap.Logger,
 ) *ProfileProcessor {
-	return &ProfileProcessor{requestsRepo: requestsRepo, astroProvider: astroProvider, logger: logger}
+	return &ProfileProcessor{astroRepo: astroRepo, requestsRepo: requestsRepo, astroProvider: astroProvider, crmClient: crmClient, logger: logger}
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
@@ -388,37 +432,98 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 		return err
 	}
 
-	dob, lat, lon, err := natalInputFromProfile(msg.Profile)
+	// Create a hash from UserID, BirthDate and BirthTime fields for storage
+	hash := ProfileHash(msg.Profile.UserID, msg.Profile.BirthDate, msg.Profile.BirthTime)
+	astroProfile, err := p.astroRepo.ExecuteReceivingByHash(tctx, hash)
 	if err != nil {
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
 		return err
 	}
 
-	natalData, err := p.astroProvider.GetNatalChart(tctx, dob, lat, lon)
-	if err != nil {
-		span.RecordError(err)
-		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
-		return fmt.Errorf("astro natal chart: %w", err)
+	if astroProfile == nil {
+
+		dob, lat, lon, err := natalInputFromProfile(msg.Profile)
+		if err != nil {
+			span.RecordError(err)
+			p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
+			return err
+		}
+
+		natalData, err := p.astroProvider.GetNatalChart(tctx, dob, lat, lon)
+		if err != nil {
+			span.RecordError(err)
+			p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
+			return fmt.Errorf("astro natal chart: %w", err)
+		}
+
+		profileData := natalDataToAstroProfile(natalData)
+		profile := domain.AstroProfile{
+			ID:           msg.RequestID,
+			UserID:       msg.Profile.UserID,
+			ProfileHash:  hash,
+			DOB:          msg.Profile.BirthDate,
+			DOBTime:      msg.Profile.BirthTime,
+			ConsentGiven: msg.Profile.ConsentGiven,
+			ProfileData:  profileData,
+		}
+
+		// store db or cache
+		err = p.astroRepo.ExecuteSave(tctx, profile)
+		if err != nil {
+			span.RecordError(err)
+			p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
+			return fmt.Errorf("store astro profile error: %w", err)
+		}
+
+		/*resultJSON, err := json.Marshal(natalData)
+		if err != nil {
+			span.RecordError(err)
+			p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
+			return fmt.Errorf("marshal natal chart: %w", err)
+		}*/
+
+		astrologger.Info(tctx, "astro profile generated",
+			zap.String("request_id", msg.RequestID),
+			zap.String("user_id", msg.Profile.UserID))
+		astroProfile = &profile
+	} else {
+		astrologger.Info(tctx, "astro profile got from storage",
+			zap.String("request_id", msg.RequestID),
+			zap.String("user_id", msg.Profile.UserID))
 	}
 
-	resultJSON, err := json.Marshal(natalData)
-	if err != nil {
-		span.RecordError(err)
-		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
-		return fmt.Errorf("marshal natal chart: %w", err)
-	}
+	// post CRM webhook_url with astroprofile
+	p.crmClient.SendProfile(tctx, *astroProfile)
 
-	if err := p.requestsRepo.UpdateStatus(tctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
+	if err := p.requestsRepo.UpdateStatus(tctx, msg.RequestID, requests.StatusCompleted, nil, ""); err != nil {
 		span.RecordError(err)
 		astrologger.Error(tctx, "failed to mark profile request as completed", zap.Error(err))
 		return err
 	}
 
-	astrologger.Info(tctx, "astro profile generated",
-		zap.String("request_id", msg.RequestID),
-		zap.String("user_id", msg.Profile.UserID))
 	return nil
+
+}
+
+func natalDataToAstroProfile(data astro.NatalData) domain.ProfileData {
+	var profileData domain.ProfileData
+
+	// Assigning planet signs to profile fields using mappings
+	profileData.Sun = ZodiacMapping[PlanetMapping[astro.SunID]]
+	profileData.Moon = ZodiacMapping[PlanetMapping[astro.MoonID]]
+	profileData.Mercury = ZodiacMapping[PlanetMapping[astro.MercuryID]]
+	profileData.Venus = ZodiacMapping[PlanetMapping[astro.VenusID]]
+	profileData.Mars = ZodiacMapping[PlanetMapping[astro.MarsID]]
+	profileData.Jupiter = ZodiacMapping[PlanetMapping[astro.JupiterID]]
+	profileData.Saturn = ZodiacMapping[PlanetMapping[astro.SaturnID]]
+	profileData.Uranus = ZodiacMapping[PlanetMapping[astro.UranusID]]
+	profileData.Neptune = ZodiacMapping[PlanetMapping[astro.NeptuneID]]
+	profileData.Pluto = ZodiacMapping[PlanetMapping[astro.PlutoID]]
+
+	// TODO: Handle special cases like Ascendant
+
+	return profileData
 }
 
 func (p *ProfileProcessor) markRetryOrFailed(ctx context.Context, requestID string, err error, worker string) {
@@ -449,28 +554,28 @@ func (p *ProfileProcessor) nextFailureStatus(ctx context.Context, requestID stri
 // RecommendProcessor обрабатывает сообщения astro.events.recommend.
 // Строит рекомендацию через Astro API + AlisaAI и пишет результат в requests_log.
 type RecommendProcessor struct {
-	userRepo      user.Repository
+	astroRepo     AstroRepo
+	crmClient     CrmClient
 	requestsRepo  requests.Repository
 	rulesRepo     RuleMatcher
-	aiClient      alisa.Generator
 	astroProvider AstroProvider
 	logger        *zap.Logger
 }
 
 func NewRecommendProcessor(
-	userRepo user.Repository,
+	astroRepo AstroRepo,
 	requestsRepo requests.Repository,
 	rulesRepo RuleMatcher,
-	aiClient alisa.Generator,
 	astroProvider AstroProvider,
+	crmClient CrmClient,
 	logger *zap.Logger,
 ) *RecommendProcessor {
 	return &RecommendProcessor{
-		userRepo:      userRepo,
+		astroRepo:     astroRepo,
 		requestsRepo:  requestsRepo,
 		rulesRepo:     rulesRepo,
-		aiClient:      aiClient,
 		astroProvider: astroProvider,
+		crmClient:     crmClient,
 		logger:        logger,
 	}
 }
@@ -530,7 +635,7 @@ func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
 		return nil
 	}
 
-	result, err := buildRecommendation(tctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient, p.astroProvider, p.logger)
+	result, err := buildRecommendation(tctx, msg.Recommend, nil, p.rulesRepo, p.astroProvider, p.logger)
 	if err != nil {
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "recommend")
@@ -554,4 +659,14 @@ func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
 		zap.String("request_id", msg.RequestID),
 		zap.String("user_id", msg.Recommend.UserID))
 	return nil
+}
+
+func ProfileHash(userID, birthDate, birthTime string) string {
+	// Create a hash from UserID, BirthDate and BirthTime fields for storage
+	var hashInput strings.Builder
+	hashInput.WriteString(userID)
+	hashInput.WriteString(birthDate)
+	hashInput.WriteString(birthTime)
+
+	return fmt.Sprintf("%x", md5.Sum([]byte(hashInput.String())))
 }
