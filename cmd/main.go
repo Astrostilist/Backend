@@ -166,7 +166,7 @@ func run() error {
 		return fmt.Errorf("failed to init astro provider: %w", err)
 	}
 
-	crmClient := retailcrm.NewClient(cfg.CRMBaseUrl, cfg.CRMApiKey)
+	crmClient := retailcrm.NewClient(cfg.CRMBaseURL, cfg.CRMApiKey)
 
 	profileProcessor := handlers.NewProfileProcessor(astroProfileUC, requestsRepo, astroClient, crmClient, zapLogger)
 	recommendProcessor := handlers.NewRecommendProcessor(astroProfileUC, userRepo, productsRepo, requestsRepo, rulesRepo, astroClient, crmClient, zapLogger)

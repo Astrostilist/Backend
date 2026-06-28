@@ -59,7 +59,7 @@ type Config struct {
 	AstroAPIKey   string
 
 	// CRM
-	CRMBaseUrl string
+	CRMBaseURL string
 	CRMApiKey  string
 }
 
@@ -113,7 +113,7 @@ func Load() *Config {
 		AstroAPIURL:   getEnv("ASTRO_API_URL", "https://api.freeastroapi.com"),
 		AstroAPIKey:   getEnv("ASTRO_API_KEY", getEnv("FREE_ASTRO_API_KEY", "")),
 
-		CRMBaseUrl: getEnv("CRM_BASE_URL", "https://iline-group.retailcrm.ru"),
+		CRMBaseURL: getEnv("CRM_BASE_URL", "https://iline-group.retailcrm.ru"),
 		CRMApiKey:  getEnv("CRM_API_KEY", "Ixr2gNhj2Xlzb6HKp3nHvwYBbjsZb6t8"),
 	}
 }

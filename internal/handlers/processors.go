@@ -2,7 +2,8 @@ package handlers
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,7 +38,7 @@ type AstroProvider interface {
 
 // RecommendationResult — результат построения рекомендации (общий для sync и async).
 type RecommendationResult struct {
-	RequestId string                  `json:"request_id"`
+	RequestID string                  `json:"request_id"`
 	Text      string                  `json:"text"`
 	Tags      []string                `json:"tags"`
 	Recommend []models.CatalogProduct `json:"recommended_items"` // TODO: поменять на DTO модель
@@ -305,8 +306,8 @@ func natalDataToAstroProfile(data astro.NatalData) domain.ProfileData {
 	var profileData domain.ProfileData
 
 	for _, p := range data.Planets {
-		if setter, ok := PlanetSetters[p.Id]; ok {
-			setter(&profileData, ZodiacMapping[p.SignId])
+		if setter, ok := PlanetSetters[p.ID]; ok {
+			setter(&profileData, ZodiacMapping[p.SignID])
 		}
 	}
 
@@ -487,7 +488,7 @@ func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
 	}
 
 	resp := RecommendationResult{
-		RequestId: msg.RequestID,
+		RequestID: msg.RequestID,
 		Recommend: prods,
 	}
 
@@ -546,5 +547,6 @@ func ProfileHash(userID, birthDate string) string {
 	hashInput.WriteString(userID)
 	hashInput.WriteString(birthDate)
 
-	return fmt.Sprintf("%x", md5.Sum([]byte(hashInput.String())))
+	hash := sha256.Sum256([]byte(hashInput.String()))
+	return hex.EncodeToString(hash[:])
 }

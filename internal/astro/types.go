@@ -20,10 +20,10 @@ type DateOfBirth struct {
 // PlanetPosition is the normalized planet-in-sign format consumed by
 // rule matching, prompt building and astro_triggers logic.
 type PlanetPosition struct {
-	Id         string  `json:"id"`
+	ID         string  `json:"id"`
 	Name       string  `json:"name"`
 	Sign       string  `json:"sign"`
-	SignId     string  `json:"sign_id"`
+	SignID     string  `json:"sign_id"`
 	House      int     `json:"house,omitempty"`
 	Degree     float64 `json:"degree,omitempty"`
 	Retrograde bool    `json:"retrograde,omitempty"`
