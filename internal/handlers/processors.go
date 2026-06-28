@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -44,119 +43,6 @@ type RecommendationResult struct {
 	Recommend []models.CatalogProduct `json:"recommended_items"` // TODO: поменять на DTO модель
 }
 
-// triggersFromContext достаёт список триггеров из context.
-// Ожидается формат `{"triggers": ["Полнолуние", ...]}`.
-func triggersFromContext(ctx map[string]any) ([]string, bool) {
-	raw, ok := ctx["triggers"]
-	if !ok {
-		return nil, false
-	}
-	arr, ok := raw.([]any)
-	if !ok {
-		return nil, false
-	}
-	triggers := make([]string, 0, len(arr))
-	for _, v := range arr {
-		if s, ok := v.(string); ok {
-			triggers = append(triggers, s)
-		}
-	}
-	return triggers, true
-}
-
-func stringFromContext(ctx map[string]any, key string) (string, bool) {
-	raw, ok := ctx[key]
-	if !ok {
-		return "", false
-	}
-	value, ok := raw.(string)
-	if !ok {
-		return "", false
-	}
-	return value, value != ""
-}
-
-func natalInputFromRequest(ctx map[string]any, birthDate string) (astro.DateOfBirth, float64, float64, error) {
-	parsedDate, err := time.Parse("2006-01-02", birthDate)
-	if err != nil {
-		return astro.DateOfBirth{}, 0, 0, fmt.Errorf("validation: birth_date must be YYYY-MM-DD: %w", err)
-	}
-	lat, hasLat := floatFromContext(ctx, "lat")
-	if !hasLat {
-		lat, hasLat = floatFromContext(ctx, "birth_lat")
-	}
-	lon, hasLon := floatFromContext(ctx, "lon")
-	if !hasLon {
-		lon, hasLon = floatFromContext(ctx, "birth_lon")
-	}
-	if !hasLat || !hasLon {
-		return astro.DateOfBirth{}, 0, 0, errors.New("validation: natal chart requires lat/lon or birth_lat/birth_lon")
-	}
-	hour, minute := timeFromContext(ctx, "birth_time")
-	timezone, _ := stringFromContext(ctx, "timezone")
-	dob := astro.DateOfBirth{
-		Year:     parsedDate.Year(),
-		Month:    int(parsedDate.Month()),
-		Day:      parsedDate.Day(),
-		Hour:     hour,
-		Minute:   minute,
-		Timezone: timezone,
-	}
-	return dob, lat, lon, nil
-}
-
-func appendUniqueTriggers(existing []string, incoming []string) []string {
-	seen := make(map[string]struct{}, len(existing)+len(incoming))
-	result := make([]string, 0, len(existing)+len(incoming))
-	for _, trigger := range existing {
-		if _, ok := seen[trigger]; !ok {
-			result = append(result, trigger)
-			seen[trigger] = struct{}{}
-		}
-	}
-	for _, trigger := range incoming {
-		if _, ok := seen[trigger]; !ok {
-			result = append(result, trigger)
-			seen[trigger] = struct{}{}
-		}
-	}
-	return result
-}
-
-func floatFromContext(ctx map[string]any, key string) (float64, bool) {
-	raw, ok := ctx[key]
-	if !ok {
-		return 0, false
-	}
-	result := 0.0
-	success := true
-	switch value := raw.(type) {
-	case float64:
-		result = value
-	case float32:
-		result = float64(value)
-	case int:
-		result = float64(value)
-	case json.Number:
-		parsed, err := value.Float64()
-		if err != nil {
-			success = false
-		} else {
-			result = parsed
-		}
-	case string:
-		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-		if err != nil {
-			success = false
-		} else {
-			result = parsed
-		}
-	default:
-		success = false
-	}
-	return result, success
-}
-
 func natalInputFromProfile(profile ProfileRequest) (astro.DateOfBirth, float64, float64, error) {
 	parsedDate, err := time.Parse("2006-01-02", profile.BirthDate)
 	if err != nil {
@@ -172,27 +58,6 @@ func natalInputFromProfile(profile ProfileRequest) (astro.DateOfBirth, float64, 
 		Timezone: profile.Timezone,
 	}
 	return dob, *profile.Lat, *profile.Lon, nil
-}
-
-func timeFromContext(ctx map[string]any, key string) (int, int) {
-	value, ok := stringFromContext(ctx, key)
-	if !ok {
-		return 0, 0
-	}
-	return timeFromValue(value)
-}
-
-func timeFromValue(value string) (int, int) {
-	parts := strings.Split(value, ":")
-	if len(parts) < 2 {
-		return 0, 0
-	}
-	hour, hourErr := strconv.Atoi(parts[0])
-	minute, minuteErr := strconv.Atoi(parts[1])
-	if hourErr != nil || minuteErr != nil {
-		return 0, 0
-	}
-	return hour, minute
 }
 
 func workerPayload(message []byte) (json.RawMessage, map[string]string, error) {
@@ -257,7 +122,7 @@ func beginRequestProcessing(
 				zap.Int("attempt_count", current.AttemptCount))
 			return false, nil
 		}
-		return false, fmt.Errorf("request %s allready in processing by another worker: status=%s attempt_count=%d",
+		return false, fmt.Errorf("request %s already in processing by another worker: status=%s attempt_count=%d",
 			requestID, current.Status, current.AttemptCount)
 	}
 	return true, nil
@@ -339,7 +204,7 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 	// Create a hash from UserID andBirthDate fields for storage
 	hash := ProfileHash(msg.Profile.UserID, msg.Profile.BirthDate)
 	astroProfile, err := p.astroRepo.ExecuteReceivingByHash(tctx, hash)
-	if err != nil && !errors.Is(usecases.ErrNotFound, err) {
+	if err != nil && !errors.Is(err, usecases.ErrNotFound) {
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
 		return err
@@ -379,13 +244,6 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 			p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
 			return fmt.Errorf("store astro profile error: %w", err)
 		}
-
-		/*resultJSON, err := json.Marshal(natalData)
-		if err != nil {
-			span.RecordError(err)
-			p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
-			return fmt.Errorf("marshal natal chart: %w", err)
-		}*/
 
 		astrologger.Info(tctx, "astro profile generated",
 			zap.String("request_id", msg.RequestID),
@@ -676,7 +534,7 @@ func buildTriggers(planets domain.ProfileData) []string {
 
 	for planet, sign := range planetMap {
 		if sign != "" {
-			triggers = append(triggers, fmt.Sprintf(`{"sign": "%s", "planet": "%s"}`, sign, planet))
+			triggers = append(triggers, fmt.Sprintf(`{"sign": %q, "planet": %q}`, sign, planet))
 		}
 	}
 	return triggers
