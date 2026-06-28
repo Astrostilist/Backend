@@ -18,8 +18,9 @@ import (
 )
 
 type fakeProductsRepository struct {
-	items   map[string]models.CatalogProduct
-	listErr error
+	items     map[string]models.CatalogProduct
+	recommend []models.CatalogProduct
+	listErr   error
 }
 
 func newFakeProductsRepository(items []models.CatalogProduct) *fakeProductsRepository {
@@ -27,6 +28,8 @@ func newFakeProductsRepository(items []models.CatalogProduct) *fakeProductsRepos
 	for _, item := range items {
 		repository.items[item.SKU] = item
 	}
+	repository.recommend = make([]models.CatalogProduct, len(items))
+	copy(repository.recommend, items)
 	return repository
 }
 
@@ -83,6 +86,14 @@ func (r *fakeProductsRepository) Patch(_ context.Context, sku string, input prod
 	r.items[sku] = productItem
 
 	return productItem, nil
+}
+
+func (r *fakeProductsRepository) Recommend(_ context.Context, tags []string, gender, scenario string, preferences map[string]any) ([]models.CatalogProduct, error) {
+	if r.listErr != nil {
+		return []models.CatalogProduct{}, r.listErr
+	}
+
+	return r.recommend, nil
 }
 
 type fakeProductCacheInvalidator struct {

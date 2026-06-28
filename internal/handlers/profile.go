@@ -27,7 +27,6 @@ const (
 type ProfileRequest struct {
 	UserID       string   `json:"user_id"`
 	BirthDate    string   `json:"birth_date"`
-	BirthTime    string   `json:"birth_time,omitempty"`
 	BirthPlace   string   `json:"birth_place,omitempty"`
 	Lat          *float64 `json:"lat"`
 	Lon          *float64 `json:"lon"`
@@ -144,7 +143,6 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 		PersonalData: domain.PersonalData{
 			UserID:       req.UserID,
 			DOB:          req.BirthDate,
-			DOBTime:      req.BirthTime,
 			ConsentGiven: req.ConsentGiven,
 		},
 	})

@@ -169,7 +169,7 @@ func run() error {
 	crmClient := retailcrm.NewClient(cfg.CRMBaseUrl, cfg.CRMApiKey)
 
 	profileProcessor := handlers.NewProfileProcessor(astroProfileUC, requestsRepo, astroClient, crmClient, zapLogger)
-	recommendProcessor := handlers.NewRecommendProcessor(astroProfileUC, requestsRepo, rulesRepo, astroClient, crmClient, zapLogger)
+	recommendProcessor := handlers.NewRecommendProcessor(astroProfileUC, userRepo, productsRepo, requestsRepo, rulesRepo, astroClient, crmClient, zapLogger)
 
 	msgRouter := handlers.NewMsgRouter(zapLogger)
 	msgRouter.Register(models.MsgProfileSubj, profileProcessor)

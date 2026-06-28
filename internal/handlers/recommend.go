@@ -31,10 +31,11 @@ var validScenarios = map[string]bool{
 
 // RecommendRequest — payload POST /api/v1/astro/recommend.
 type RecommendRequest struct {
-	UserID   string         `json:"user_id"`
-	Scenario string         `json:"scenario"`
-	Context  map[string]any `json:"context,omitempty"`
-	Mode     string         `json:"mode,omitempty"`
+	UserID      string         `json:"user_id"`
+	Scenario    string         `json:"scenario"`
+	Gender      string         `json:"gender"`
+	Preferences map[string]any `json:"preferences,omitempty"`
+	Mode        string         `json:"mode,omitempty"`
 }
 
 // Validate проверяет запрос и проставляет Mode=async по умолчанию.

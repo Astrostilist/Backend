@@ -5,7 +5,6 @@ import "errors"
 type PersonalData struct {
 	UserID       string
 	DOB          string
-	DOBTime      string
 	ConsentGiven bool
 }
 
@@ -14,7 +13,6 @@ type AstroProfile struct {
 	UserID       string
 	ProfileHash  string
 	DOB          string
-	DOBTime      string
 	ConsentGiven bool
 	ProfileData  ProfileData
 }
