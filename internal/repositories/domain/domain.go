@@ -1,5 +1,7 @@
 package domain
 
+import "errors"
+
 type PersonalData struct {
 	UserID       string
 	DOB          string
@@ -62,3 +64,6 @@ const (
 	AquariusID    = "aquarius"
 	PiscesID      = "pisces"
 )
+
+// ErrNotFound возвращается, когда данные не найдены.
+var ErrNotFound = errors.New("user not found")

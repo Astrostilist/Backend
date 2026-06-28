@@ -15,6 +15,7 @@ import (
 	"astroapi/internal/models"
 	"astroapi/internal/repositories/domain"
 	"astroapi/internal/requests"
+	"astroapi/internal/usecases"
 	"astroapi/internal/user"
 
 	"go.opentelemetry.io/otel"
@@ -352,7 +353,7 @@ func beginRequestProcessing(
 				zap.Int("attempt_count", current.AttemptCount))
 			return false, nil
 		}
-		return false, fmt.Errorf("request %s has no result_payload and cannot start processing: status=%s attempt_count=%d",
+		return false, fmt.Errorf("request %s allready in processing by another worker: status=%s attempt_count=%d",
 			requestID, current.Status, current.AttemptCount)
 	}
 	return true, nil
@@ -367,7 +368,6 @@ type ProfileProcessor struct {
 	crmClient     CrmClient
 	logger        *zap.Logger
 }
-
 type AstroRepo interface {
 	ExecuteSave(ctx context.Context, profile domain.AstroProfile) error
 	ExecuteReceivingByHash(ctx context.Context, hash string) (*domain.AstroProfile, error)
@@ -435,7 +435,7 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 	// Create a hash from UserID, BirthDate and BirthTime fields for storage
 	hash := ProfileHash(msg.Profile.UserID, msg.Profile.BirthDate, msg.Profile.BirthTime)
 	astroProfile, err := p.astroRepo.ExecuteReceivingByHash(tctx, hash)
-	if err != nil {
+	if err != nil && !errors.Is(usecases.ErrNotFound, err) {
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
 		return err

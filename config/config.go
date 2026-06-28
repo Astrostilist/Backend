@@ -110,7 +110,7 @@ func Load() *Config {
 		AIAPIKey:      getEnv("AI_API_KEY", ""),
 		AIModelURL:    getEnv("AI_MODEL_URL", ""),
 		AstroProvider: getEnv("ASTRO_PROVIDER", "external"),
-		AstroAPIURL:   getEnv("ASTRO_API_URL", ""),
+		AstroAPIURL:   getEnv("ASTRO_API_URL", "https://api.freeastroapi.com"),
 		AstroAPIKey:   getEnv("ASTRO_API_KEY", getEnv("FREE_ASTRO_API_KEY", "")),
 
 		CRMBaseUrl: getEnv("CRM_BASE_URL", "https://iline-group.retailcrm.ru"),

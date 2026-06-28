@@ -15,6 +15,12 @@ import (
 	"go.uber.org/zap"
 )
 
+//go:generate mockgen -source=client.go -destination=mocks/mock_crmcliente.go -package=mocks
+type CrmClient interface {
+	SendProfile(ctx context.Context, profile domain.AstroProfile) error
+	SendRecommend(ctx context.Context, recommend string) error
+}
+
 // RetailCRMClient — клиент для взаимодействия с RetailCRM API.
 type RetailCRMClient struct {
 	baseURL    string
@@ -42,12 +48,14 @@ func NewClient(baseURL, apiKey string) *RetailCRMClient {
 // SendProfile отправляет данные астропрофиля.
 func (c *RetailCRMClient) SendProfile(ctx context.Context, profile domain.AstroProfile) error {
 	// TODO:  implement method
+	astrologger.Info(ctx, "post to crm mock", zap.Any("profile", profile))
 	return nil
 }
 
 // SendRecommend отправляет данные рекомендаций.
 func (c *RetailCRMClient) SendRecommend(ctx context.Context, recommend string) error {
 	// TODO:  implement method
+	astrologger.Info(ctx, "post to crm mock", zap.Any("recommend", recommend))
 	return nil
 }
 
