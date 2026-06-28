@@ -23,34 +23,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var ZodiacMapping = map[string]string{
-	astro.AriesID:       domain.AriesID,
-	astro.TaurusID:      domain.TaurusID,
-	astro.GeminiID:      domain.GeminiID,
-	astro.CancerID:      domain.CancerID,
-	astro.LeoID:         domain.LeoID,
-	astro.VirgoID:       domain.VirgoID,
-	astro.LibraID:       domain.LibraID,
-	astro.ScorpioID:     domain.ScorpioID,
-	astro.SagittariusID: domain.SagittariusID,
-	astro.CapricornID:   domain.CapricornID,
-	astro.AquariusID:    domain.AquariusID,
-	astro.PiscesID:      domain.PiscesID,
-}
-
-var PlanetMapping = map[string]string{
-	astro.SunID:     domain.Sun,
-	astro.MoonID:    domain.Moon,
-	astro.MercuryID: domain.Mercury,
-	astro.VenusID:   domain.Venus,
-	astro.MarsID:    domain.Mars,
-	astro.JupiterID: domain.Jupiter,
-	astro.SaturnID:  domain.Saturn,
-	astro.UranusID:  domain.Uranus,
-	astro.NeptuneID: domain.Neptune,
-	astro.PlutoID:   domain.Pluto,
-}
-
 // RuleMatcher — узкий интерфейс: handlers нужны только триггеры → тэги.
 // Реализуется ruleengine.PostgresRepository (и моками в тестах).
 type RuleMatcher interface {
@@ -456,6 +428,7 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 			p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
 			return fmt.Errorf("astro natal chart: %w", err)
 		}
+		astrologger.Debug(tctx, "got natal data", zap.Any("natalData", natalData))
 
 		profileData := natalDataToAstroProfile(natalData)
 		profile := domain.AstroProfile{
@@ -506,22 +479,42 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 
 }
 
+var ZodiacMapping = map[string]string{
+	astro.AriesID:       domain.AriesID,
+	astro.TaurusID:      domain.TaurusID,
+	astro.GeminiID:      domain.GeminiID,
+	astro.CancerID:      domain.CancerID,
+	astro.LeoID:         domain.LeoID,
+	astro.VirgoID:       domain.VirgoID,
+	astro.LibraID:       domain.LibraID,
+	astro.ScorpioID:     domain.ScorpioID,
+	astro.SagittariusID: domain.SagittariusID,
+	astro.CapricornID:   domain.CapricornID,
+	astro.AquariusID:    domain.AquariusID,
+	astro.PiscesID:      domain.PiscesID,
+}
+
+var PlanetSetters = map[string]func(*domain.ProfileData, string){
+	astro.SunID:     func(pd *domain.ProfileData, s string) { pd.Sun = s },
+	astro.MoonID:    func(pd *domain.ProfileData, s string) { pd.Moon = s },
+	astro.MercuryID: func(pd *domain.ProfileData, s string) { pd.Mercury = s },
+	astro.VenusID:   func(pd *domain.ProfileData, s string) { pd.Venus = s },
+	astro.MarsID:    func(pd *domain.ProfileData, s string) { pd.Mars = s },
+	astro.JupiterID: func(pd *domain.ProfileData, s string) { pd.Jupiter = s },
+	astro.SaturnID:  func(pd *domain.ProfileData, s string) { pd.Saturn = s },
+	astro.UranusID:  func(pd *domain.ProfileData, s string) { pd.Uranus = s },
+	astro.NeptuneID: func(pd *domain.ProfileData, s string) { pd.Neptune = s },
+	astro.PlutoID:   func(pd *domain.ProfileData, s string) { pd.Pluto = s },
+}
+
 func natalDataToAstroProfile(data astro.NatalData) domain.ProfileData {
 	var profileData domain.ProfileData
 
-	// Assigning planet signs to profile fields using mappings
-	profileData.Sun = ZodiacMapping[PlanetMapping[astro.SunID]]
-	profileData.Moon = ZodiacMapping[PlanetMapping[astro.MoonID]]
-	profileData.Mercury = ZodiacMapping[PlanetMapping[astro.MercuryID]]
-	profileData.Venus = ZodiacMapping[PlanetMapping[astro.VenusID]]
-	profileData.Mars = ZodiacMapping[PlanetMapping[astro.MarsID]]
-	profileData.Jupiter = ZodiacMapping[PlanetMapping[astro.JupiterID]]
-	profileData.Saturn = ZodiacMapping[PlanetMapping[astro.SaturnID]]
-	profileData.Uranus = ZodiacMapping[PlanetMapping[astro.UranusID]]
-	profileData.Neptune = ZodiacMapping[PlanetMapping[astro.NeptuneID]]
-	profileData.Pluto = ZodiacMapping[PlanetMapping[astro.PlutoID]]
-
-	// TODO: Handle special cases like Ascendant
+	for _, p := range data.Planets {
+		if setter, ok := PlanetSetters[p.Id]; ok {
+			setter(&profileData, ZodiacMapping[p.SignId])
+		}
+	}
 
 	return profileData
 }

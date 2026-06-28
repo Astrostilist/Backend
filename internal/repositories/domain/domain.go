@@ -26,8 +26,6 @@ type ProfileData struct {
 	Mars    string `json:"mars"`
 	Jupiter string `json:"jupiter"`
 	Saturn  string `json:"saturn"`
-	Rahu    string `json:"rahu"`
-	Ketu    string `json:"ketu"`
 	Mercury string `json:"mercury"`
 	Neptune string `json:"neptune"`
 	Uranus  string `json:"uranus"`
@@ -41,8 +39,6 @@ const (
 	Mars    = "mars"
 	Jupiter = "jupiter"
 	Saturn  = "saturn"
-	Rahu    = "rahu"
-	Ketu    = "ketu"
 	Mercury = "mercury"
 	Neptune = "neptune"
 	Uranus  = "uranus"

@@ -126,8 +126,6 @@ func russianPlanetNames() map[string]string {
 		"uranus":  "Уран",
 		"neptune": "Нептун",
 		"pluto":   "Плутон",
-		"rahu":    "Раху",
-		"ketu":    "Кету",
 	}
 }
 

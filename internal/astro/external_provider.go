@@ -132,7 +132,9 @@ type externalChartResponse struct {
 }
 
 type externalAstroBody struct {
+	Id         string             `json:"id"`
 	Name       string             `json:"name"`
+	SignId     string             `json:"sign_id"`
 	Sign       string             `json:"sign"`
 	SignName   string             `json:"sign_name"`
 	Rashi      string             `json:"rashi"`
@@ -190,7 +192,9 @@ func mapExternalAstroBody(body externalAstroBody) PlanetPosition {
 		degree = body.Position
 	}
 	return PlanetPosition{
+		Id:         strings.TrimSpace(body.Id),
 		Name:       strings.TrimSpace(body.Name),
+		SignId:     strings.TrimSpace(body.SignId),
 		Sign:       firstNonEmpty(body.Sign, body.SignName, body.Rashi, signNameFromObject(body.SignObject)),
 		House:      body.House,
 		Degree:     degree,
