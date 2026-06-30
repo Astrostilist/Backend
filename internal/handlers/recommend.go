@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"astroapi/internal/alisa"
 	astrologger "astroapi/internal/infrastructure/logger"
 	"astroapi/internal/models"
 	"astroapi/internal/requests"
@@ -32,10 +31,11 @@ var validScenarios = map[string]bool{
 
 // RecommendRequest — payload POST /api/v1/astro/recommend.
 type RecommendRequest struct {
-	UserID   string         `json:"user_id"`
-	Scenario string         `json:"scenario"`
-	Context  map[string]any `json:"context,omitempty"`
-	Mode     string         `json:"mode,omitempty"`
+	UserID      string         `json:"user_id"`
+	Scenario    string         `json:"scenario"`
+	Gender      string         `json:"gender"`
+	Preferences map[string]any `json:"preferences,omitempty"`
+	Mode        string         `json:"mode,omitempty"`
 }
 
 // Validate проверяет запрос и проставляет Mode=async по умолчанию.
@@ -55,7 +55,6 @@ type RecommendHandler struct {
 	publisher     MsgPublisher
 	userRepo      user.Repository
 	rulesRepo     RuleMatcher
-	aiClient      alisa.Generator
 	astroProvider AstroProvider
 	requestsRepo  requests.Repository
 	logger        *zap.Logger
@@ -65,7 +64,6 @@ func NewRecommendHandler(
 	publisher MsgPublisher,
 	userRepo user.Repository,
 	rulesRepo RuleMatcher,
-	aiClient alisa.Generator,
 	astroProvider AstroProvider,
 	requestsRepo requests.Repository,
 	logger *zap.Logger,
@@ -74,7 +72,6 @@ func NewRecommendHandler(
 		publisher:     publisher,
 		userRepo:      userRepo,
 		rulesRepo:     rulesRepo,
-		aiClient:      aiClient,
 		astroProvider: astroProvider,
 		requestsRepo:  requestsRepo,
 		logger:        logger,

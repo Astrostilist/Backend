@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"go.uber.org/zap/zaptest"
 )
 
 func TestRetailCRMClient_GetCustomer(t *testing.T) {
@@ -33,8 +31,7 @@ func TestRetailCRMClient_GetCustomer(t *testing.T) {
 
 	// 2. Инициализируем клиента
 	// zaptest.NewLogger пишет логи прямо в консоль тестов, позволяя проверить вызов logger.Debug
-	logger := zaptest.NewLogger(t)
-	client := NewClient(mockServer.URL, expectedAPIKey, logger)
+	client := NewClient(mockServer.URL, expectedAPIKey)
 
 	// 3. Выполняем тестируемый метод
 	resp, err := client.GetCustomer(context.Background(), expectedExternalID)
@@ -82,8 +79,7 @@ func TestRetailCRMClient_UpdateCustomer(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	logger := zaptest.NewLogger(t)
-	client := NewClient(mockServer.URL, expectedAPIKey, logger)
+	client := NewClient(mockServer.URL, expectedAPIKey)
 
 	err := client.UpdateCustomer(context.Background(), expectedExternalID, customFields)
 	if err != nil {

@@ -17,6 +17,7 @@ var ErrNotFound = errors.New("user not found")
 type User struct {
 	UserID       string
 	BirthDate    string // ISO 8601 (YYYY-MM-DD), plaintext в памяти
+	BirthTame    string
 	ConsentGiven bool
 }
 

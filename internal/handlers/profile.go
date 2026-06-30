@@ -27,7 +27,6 @@ const (
 type ProfileRequest struct {
 	UserID       string   `json:"user_id"`
 	BirthDate    string   `json:"birth_date"`
-	BirthTime    string   `json:"birth_time,omitempty"`
 	BirthPlace   string   `json:"birth_place,omitempty"`
 	Lat          *float64 `json:"lat"`
 	Lon          *float64 `json:"lon"`
@@ -37,7 +36,7 @@ type ProfileRequest struct {
 
 // ProfileHandler обрабатывает POST /api/v1/astro/profile.
 // Действия: валидация → создать запись в requests_log (status=pending) →
-// Сохраняем данный либо в БД, либо в memcached →
+// Сохраняем данные либо в БД, либо в memcached →
 // опубликовать событие в JetStream → вернуть 202 с request_id.
 type ProfileHandler struct {
 	publisher    MsgPublisher
@@ -162,6 +161,7 @@ func (h *ProfileHandler) HandleProfile(w http.ResponseWriter, r *http.Request) {
 
 	pubctx, publishSpan := tracer.Start(hctx, "nats.publish-profile")
 	defer publishSpan.End()
+	// TODO: encrypt DOB
 	payload := profilePayload{RequestID: requestID, Profile: req}
 	if err := h.publisher.PublishMessage(hctx, models.MsgStreamEvents, models.MsgProfileSubj, payload); err != nil {
 		astrologger.Error(pubctx, "failed to publish profile event", zap.Error(err))

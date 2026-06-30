@@ -17,7 +17,7 @@ type CacheRepo struct {
 	ttl    int32
 }
 
-func NewCacheRepo(ttl time.Duration, servers []string) *CacheRepo {
+func NewCacheRepo(servers []string, ttl time.Duration) *CacheRepo {
 	return &CacheRepo{
 		client: memcache.New(servers...),
 		ttl:    int32(ttl.Seconds()),

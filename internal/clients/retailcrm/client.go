@@ -1,6 +1,8 @@
 package retailcrm
 
 import (
+	astrologger "astroapi/internal/infrastructure/logger"
+	"astroapi/internal/repositories/domain"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,12 +15,17 @@ import (
 	"go.uber.org/zap"
 )
 
+//go:generate mockgen -source=client.go -destination=mocks/mock_crmcliente.go -package=mocks
+type CrmClient interface {
+	SendProfile(ctx context.Context, profile domain.AstroProfile) error
+	SendRecommend(ctx context.Context, recommend string) error
+}
+
 // RetailCRMClient — клиент для взаимодействия с RetailCRM API.
 type RetailCRMClient struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
-	logger     *zap.Logger
 }
 
 // CustomerResponse — упрощенная структура ответа для GetCustomer.
@@ -28,15 +35,28 @@ type CustomerResponse struct {
 }
 
 // NewClient создает и настраивает новый экземпляр клиента RetailCRM.
-func NewClient(baseURL, apiKey string, logger *zap.Logger) *RetailCRMClient {
+func NewClient(baseURL, apiKey string) *RetailCRMClient {
 	return &RetailCRMClient{
 		baseURL: strings.TrimRight(baseURL, "/"), // Убираем слэш на конце, если он есть
 		apiKey:  apiKey,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		logger: logger,
 	}
+}
+
+// SendProfile отправляет данные астропрофиля.
+func (c *RetailCRMClient) SendProfile(ctx context.Context, profile domain.AstroProfile) error {
+	// TODO:  implement method
+	astrologger.Info(ctx, "post to crm mock", zap.Any("profile", profile))
+	return nil
+}
+
+// SendRecommend отправляет данные рекомендаций.
+func (c *RetailCRMClient) SendRecommend(ctx context.Context, recommend string) error {
+	// TODO:  implement method
+	astrologger.Info(ctx, "post to crm mock", zap.Any("recommend", recommend))
+	return nil
 }
 
 // doRequest выполняет HTTP-запрос, инжектит X-API-KEY и логирует endpoint.
@@ -57,7 +77,7 @@ func (c *RetailCRMClient) doRequest(ctx context.Context, method, endpoint string
 	req.Header.Set("Accept", "application/json")
 
 	// Логирование согласно спецификации
-	c.logger.Debug("retailcrm request",
+	astrologger.Debug(ctx, "retailcrm request",
 		zap.String("method", method),
 		zap.String("endpoint", endpoint),
 	)
@@ -68,7 +88,7 @@ func (c *RetailCRMClient) doRequest(ctx context.Context, method, endpoint string
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
-			c.logger.Warn("failed to close response body", zap.Error(closeErr))
+			astrologger.Warn(ctx, "failed to close response body", zap.Error(closeErr))
 		}
 	}()
 

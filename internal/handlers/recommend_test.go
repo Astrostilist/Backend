@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	almocks "astroapi/internal/alisa/mocks"
 	"astroapi/internal/handlers"
 	msgmocks "astroapi/internal/handlers/mocks"
 	"astroapi/internal/models"
@@ -28,7 +27,6 @@ func newRecommendDeps(t *testing.T) (
 	*msgmocks.MockMsgPublisher,
 	*usermocks.MockRepository,
 	*rulemocks.MockRepository,
-	*almocks.MockGenerator,
 	*reqmocks.MockRepository,
 ) {
 	t.Helper()
@@ -36,13 +34,12 @@ func newRecommendDeps(t *testing.T) (
 	return msgmocks.NewMockMsgPublisher(ctrl),
 		usermocks.NewMockRepository(ctrl),
 		rulemocks.NewMockRepository(ctrl),
-		almocks.NewMockGenerator(ctrl),
 		reqmocks.NewMockRepository(ctrl)
 }
 
 func TestRecommend_AsyncPublishesToNATS(t *testing.T) {
 	t.Parallel()
-	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+	pub, userRepo, rulesRepo, reqRepo := newRecommendDeps(t)
 
 	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	pub.EXPECT().
@@ -50,7 +47,7 @@ func TestRecommend_AsyncPublishesToNATS(t *testing.T) {
 		Return(nil).
 		Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -83,10 +80,10 @@ func TestRecommend_Validation(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+			pub, userRepo, rulesRepo, reqRepo := newRecommendDeps(t)
 			_ = context.Background()
 			// ни один зависимый мок не должен быть вызван
-			h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
+			h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, nil, reqRepo, zap.NewNop())
 
 			body, _ := json.Marshal(tc.payload)
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader(body))
@@ -99,8 +96,8 @@ func TestRecommend_Validation(t *testing.T) {
 
 func TestRecommend_InvalidJSON(t *testing.T) {
 	t.Parallel()
-	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
+	pub, userRepo, rulesRepo, reqRepo := newRecommendDeps(t)
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, nil, reqRepo, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/astro/recommend", bytes.NewReader([]byte("invalid {")))
 	rr := httptest.NewRecorder()
@@ -110,11 +107,11 @@ func TestRecommend_InvalidJSON(t *testing.T) {
 
 func TestRecommend_DBCreateError(t *testing.T) {
 	t.Parallel()
-	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+	pub, userRepo, rulesRepo, reqRepo := newRecommendDeps(t)
 
 	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("db is down")).Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,
@@ -129,12 +126,12 @@ func TestRecommend_DBCreateError(t *testing.T) {
 
 func TestRecommend_AsyncPublishError(t *testing.T) {
 	t.Parallel()
-	pub, userRepo, rulesRepo, ai, reqRepo := newRecommendDeps(t)
+	pub, userRepo, rulesRepo, reqRepo := newRecommendDeps(t)
 
 	reqRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	pub.EXPECT().PublishMessage(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("nats down")).Times(1)
 
-	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, ai, nil, reqRepo, zap.NewNop())
+	h := handlers.NewRecommendHandler(pub, userRepo, rulesRepo, nil, reqRepo, zap.NewNop())
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":  validUserID,

@@ -40,8 +40,10 @@ type CacheInvalidator interface {
 	InvalidateProduct(ctx context.Context, sku string) error
 }
 
+//go:generate mockgen -source=products.go -destination=mocks/mock_products.go -package=mocks
 type Repository interface {
 	List(ctx context.Context, options ListOptions) (ListResult, error)
 	GetBySKU(ctx context.Context, sku string) (models.CatalogProduct, error)
 	Patch(ctx context.Context, sku string, input PatchInput) (models.CatalogProduct, error)
+	Recommend(ctx context.Context, tags []string, gender, scenario string, preferences map[string]any) ([]models.CatalogProduct, error)
 }

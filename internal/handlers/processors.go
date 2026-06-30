@@ -2,18 +2,21 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
-	"astroapi/internal/alisa"
 	"astroapi/internal/astro"
 	astrologger "astroapi/internal/infrastructure/logger"
 	"astroapi/internal/models"
+	"astroapi/internal/products"
+	"astroapi/internal/repositories/domain"
 	"astroapi/internal/requests"
+	"astroapi/internal/usecases"
 	"astroapi/internal/user"
 
 	"go.opentelemetry.io/otel"
@@ -35,187 +38,10 @@ type AstroProvider interface {
 
 // RecommendationResult — результат построения рекомендации (общий для sync и async).
 type RecommendationResult struct {
-	Text string   `json:"text"`
-	Tags []string `json:"tags"`
-}
-
-// buildRecommendation получает натальную карту через AstroProvider,
-// строит astro-триггеры, подбирает теги через ruleengine и вызывает AlisaAI.
-func buildRecommendation(
-	ctx context.Context,
-	req RecommendRequest,
-	userRepo user.Repository,
-	rulesRepo RuleMatcher,
-	ai alisa.Generator,
-	astroProvider AstroProvider,
-	logger *zap.Logger,
-) (RecommendationResult, error) {
-	u, err := userRepo.Get(ctx, req.UserID)
-	if err != nil {
-		return RecommendationResult{}, err
-	}
-
-	triggers, _ := triggersFromContext(req.Context)
-	natalData, err := buildNatalData(ctx, req, u, astroProvider)
-	if err != nil {
-		return RecommendationResult{}, err
-	}
-	triggers = appendUniqueTriggers(triggers, natalData.Triggers)
-	tags, err := rulesRepo.Match(ctx, triggers)
-	if err != nil {
-		return RecommendationResult{}, fmt.Errorf("match rules: %w", err)
-	}
-
-	enrichedCtx := map[string]any{"tags": tags}
-	for k, v := range req.Context {
-		enrichedCtx[k] = v
-	}
-
-	prompt := alisa.BuildPrompt(req.Scenario, natalData, enrichedCtx, logger)
-	if prompt == "" {
-		return RecommendationResult{}, fmt.Errorf("validation: cannot build prompt for scenario %q", req.Scenario)
-	}
-
-	text, err := ai.Generate(ctx, prompt)
-	if err != nil {
-		return RecommendationResult{}, fmt.Errorf("ai generate: %w", err)
-	}
-
-	return RecommendationResult{Text: text, Tags: tags}, nil
-}
-
-func buildNatalData(
-	ctx context.Context,
-	req RecommendRequest,
-	u user.User,
-	astroProvider AstroProvider,
-) (astro.NatalData, error) {
-	var natalData astro.NatalData
-	if astroProvider == nil {
-		return natalData, errors.New("astro provider is not configured")
-	}
-	dob, lat, lon, err := natalInputFromRequest(req.Context, u.BirthDate)
-	if err != nil {
-		return natalData, err
-	}
-	natalData, err = astroProvider.GetNatalChart(ctx, dob, lat, lon)
-	if err != nil {
-		return natalData, fmt.Errorf("astro natal chart: %w", err)
-	}
-	return natalData, nil
-}
-
-// triggersFromContext достаёт список триггеров из context.
-// Ожидается формат `{"triggers": ["Полнолуние", ...]}`.
-func triggersFromContext(ctx map[string]any) ([]string, bool) {
-	raw, ok := ctx["triggers"]
-	if !ok {
-		return nil, false
-	}
-	arr, ok := raw.([]any)
-	if !ok {
-		return nil, false
-	}
-	triggers := make([]string, 0, len(arr))
-	for _, v := range arr {
-		if s, ok := v.(string); ok {
-			triggers = append(triggers, s)
-		}
-	}
-	return triggers, true
-}
-
-func stringFromContext(ctx map[string]any, key string) (string, bool) {
-	raw, ok := ctx[key]
-	if !ok {
-		return "", false
-	}
-	value, ok := raw.(string)
-	if !ok {
-		return "", false
-	}
-	return value, value != ""
-}
-
-func natalInputFromRequest(ctx map[string]any, birthDate string) (astro.DateOfBirth, float64, float64, error) {
-	parsedDate, err := time.Parse("2006-01-02", birthDate)
-	if err != nil {
-		return astro.DateOfBirth{}, 0, 0, fmt.Errorf("validation: birth_date must be YYYY-MM-DD: %w", err)
-	}
-	lat, hasLat := floatFromContext(ctx, "lat")
-	if !hasLat {
-		lat, hasLat = floatFromContext(ctx, "birth_lat")
-	}
-	lon, hasLon := floatFromContext(ctx, "lon")
-	if !hasLon {
-		lon, hasLon = floatFromContext(ctx, "birth_lon")
-	}
-	if !hasLat || !hasLon {
-		return astro.DateOfBirth{}, 0, 0, errors.New("validation: natal chart requires lat/lon or birth_lat/birth_lon")
-	}
-	hour, minute := timeFromContext(ctx, "birth_time")
-	timezone, _ := stringFromContext(ctx, "timezone")
-	dob := astro.DateOfBirth{
-		Year:     parsedDate.Year(),
-		Month:    int(parsedDate.Month()),
-		Day:      parsedDate.Day(),
-		Hour:     hour,
-		Minute:   minute,
-		Timezone: timezone,
-	}
-	return dob, lat, lon, nil
-}
-
-func appendUniqueTriggers(existing []string, incoming []string) []string {
-	seen := make(map[string]struct{}, len(existing)+len(incoming))
-	result := make([]string, 0, len(existing)+len(incoming))
-	for _, trigger := range existing {
-		if _, ok := seen[trigger]; !ok {
-			result = append(result, trigger)
-			seen[trigger] = struct{}{}
-		}
-	}
-	for _, trigger := range incoming {
-		if _, ok := seen[trigger]; !ok {
-			result = append(result, trigger)
-			seen[trigger] = struct{}{}
-		}
-	}
-	return result
-}
-
-func floatFromContext(ctx map[string]any, key string) (float64, bool) {
-	raw, ok := ctx[key]
-	if !ok {
-		return 0, false
-	}
-	result := 0.0
-	success := true
-	switch value := raw.(type) {
-	case float64:
-		result = value
-	case float32:
-		result = float64(value)
-	case int:
-		result = float64(value)
-	case json.Number:
-		parsed, err := value.Float64()
-		if err != nil {
-			success = false
-		} else {
-			result = parsed
-		}
-	case string:
-		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-		if err != nil {
-			success = false
-		} else {
-			result = parsed
-		}
-	default:
-		success = false
-	}
-	return result, success
+	RequestID string                  `json:"request_id"`
+	Text      string                  `json:"text"`
+	Tags      []string                `json:"tags"`
+	Recommend []models.CatalogProduct `json:"recommended_items"` // TODO: поменять на DTO модель
 }
 
 func natalInputFromProfile(profile ProfileRequest) (astro.DateOfBirth, float64, float64, error) {
@@ -226,37 +52,13 @@ func natalInputFromProfile(profile ProfileRequest) (astro.DateOfBirth, float64, 
 	if profile.Lat == nil || profile.Lon == nil {
 		return astro.DateOfBirth{}, 0, 0, errors.New("validation: natal chart requires lat and lon")
 	}
-	hour, minute := timeFromValue(profile.BirthTime)
 	dob := astro.DateOfBirth{
 		Year:     parsedDate.Year(),
 		Month:    int(parsedDate.Month()),
 		Day:      parsedDate.Day(),
-		Hour:     hour,
-		Minute:   minute,
 		Timezone: profile.Timezone,
 	}
 	return dob, *profile.Lat, *profile.Lon, nil
-}
-
-func timeFromContext(ctx map[string]any, key string) (int, int) {
-	value, ok := stringFromContext(ctx, key)
-	if !ok {
-		return 0, 0
-	}
-	return timeFromValue(value)
-}
-
-func timeFromValue(value string) (int, int) {
-	parts := strings.Split(value, ":")
-	if len(parts) < 2 {
-		return 0, 0
-	}
-	hour, hourErr := strconv.Atoi(parts[0])
-	minute, minuteErr := strconv.Atoi(parts[1])
-	if hourErr != nil || minuteErr != nil {
-		return 0, 0
-	}
-	return hour, minute
 }
 
 func workerPayload(message []byte) (json.RawMessage, map[string]string, error) {
@@ -321,7 +123,7 @@ func beginRequestProcessing(
 				zap.Int("attempt_count", current.AttemptCount))
 			return false, nil
 		}
-		return false, fmt.Errorf("request %s has no result_payload and cannot start processing: status=%s attempt_count=%d",
+		return false, fmt.Errorf("request %s already in processing by another worker: status=%s attempt_count=%d",
 			requestID, current.Status, current.AttemptCount)
 	}
 	return true, nil
@@ -330,18 +132,30 @@ func beginRequestProcessing(
 // ProfileProcessor обрабатывает сообщения astro.events.profile.
 // Воркер вызывает внешний Astro API, пишет результат в requests_log и завершает задачу.
 type ProfileProcessor struct {
+	astroRepo     AstroRepo
 	requestsRepo  requests.Repository
 	astroProvider AstroProvider
+	crmClient     CrmClient
 	logger        *zap.Logger
+}
+type AstroRepo interface {
+	ExecuteSave(ctx context.Context, profile domain.AstroProfile) error
+	ExecuteReceivingByHash(ctx context.Context, hash string) (*domain.AstroProfile, error)
+}
+
+type CrmClient interface {
+	SendProfile(ctx context.Context, profile domain.AstroProfile) error
+	SendRecommend(ctx context.Context, recommend string) error
 }
 
 func NewProfileProcessor(
-	_ user.Repository,
+	astroRepo AstroRepo,
 	requestsRepo requests.Repository,
 	astroProvider AstroProvider,
+	crmClient CrmClient,
 	logger *zap.Logger,
 ) *ProfileProcessor {
-	return &ProfileProcessor{requestsRepo: requestsRepo, astroProvider: astroProvider, logger: logger}
+	return &ProfileProcessor{astroRepo: astroRepo, requestsRepo: requestsRepo, astroProvider: astroProvider, crmClient: crmClient, logger: logger}
 }
 
 func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
@@ -388,37 +202,116 @@ func (p *ProfileProcessor) Handle(ctx context.Context, message []byte) error {
 		return err
 	}
 
-	dob, lat, lon, err := natalInputFromProfile(msg.Profile)
-	if err != nil {
+	// Create a hash from UserID andBirthDate fields for storage
+	hash := ProfileHash(msg.Profile.UserID, msg.Profile.BirthDate)
+	astroProfile, err := p.astroRepo.ExecuteReceivingByHash(tctx, hash)
+	if err != nil && !errors.Is(err, usecases.ErrNotFound) {
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
 		return err
 	}
 
-	natalData, err := p.astroProvider.GetNatalChart(tctx, dob, lat, lon)
+	if astroProfile == nil {
+
+		dob, lat, lon, err := natalInputFromProfile(msg.Profile)
+		if err != nil {
+			span.RecordError(err)
+			p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
+			return err
+		}
+
+		natalData, err := p.astroProvider.GetNatalChart(tctx, dob, lat, lon)
+		if err != nil {
+			span.RecordError(err)
+			p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
+			return fmt.Errorf("astro natal chart: %w", err)
+		}
+		astrologger.Debug(tctx, "got natal data", zap.Any("natalData", natalData))
+
+		profileData := natalDataToAstroProfile(natalData)
+		profile := domain.AstroProfile{
+			ID:           msg.RequestID,
+			UserID:       msg.Profile.UserID,
+			ProfileHash:  hash,
+			DOB:          msg.Profile.BirthDate,
+			ConsentGiven: msg.Profile.ConsentGiven,
+			ProfileData:  profileData,
+		}
+
+		// store db or cache
+		err = p.astroRepo.ExecuteSave(tctx, profile)
+		if err != nil {
+			span.RecordError(err)
+			p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
+			return fmt.Errorf("store astro profile error: %w", err)
+		}
+
+		astrologger.Info(tctx, "astro profile generated",
+			zap.String("request_id", msg.RequestID),
+			zap.String("user_id", msg.Profile.UserID))
+		astroProfile = &profile
+	} else {
+		astrologger.Info(tctx, "astro profile got from storage",
+			zap.String("request_id", msg.RequestID),
+			zap.String("user_id", msg.Profile.UserID))
+	}
+
+	// post CRM webhook_url with astroprofile
+	err = p.crmClient.SendProfile(tctx, *astroProfile)
 	if err != nil {
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
-		return fmt.Errorf("astro natal chart: %w", err)
+		return fmt.Errorf("send to crm profile error: %w", err)
 	}
 
-	resultJSON, err := json.Marshal(natalData)
-	if err != nil {
-		span.RecordError(err)
-		p.markRetryOrFailed(tctx, msg.RequestID, err, "profile")
-		return fmt.Errorf("marshal natal chart: %w", err)
-	}
-
-	if err := p.requestsRepo.UpdateStatus(tctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
+	if err := p.requestsRepo.UpdateStatus(tctx, msg.RequestID, requests.StatusCompleted, nil, ""); err != nil {
 		span.RecordError(err)
 		astrologger.Error(tctx, "failed to mark profile request as completed", zap.Error(err))
 		return err
 	}
 
-	astrologger.Info(tctx, "astro profile generated",
-		zap.String("request_id", msg.RequestID),
-		zap.String("user_id", msg.Profile.UserID))
 	return nil
+
+}
+
+var ZodiacMapping = map[string]string{
+	astro.AriesID:       domain.AriesID,
+	astro.TaurusID:      domain.TaurusID,
+	astro.GeminiID:      domain.GeminiID,
+	astro.CancerID:      domain.CancerID,
+	astro.LeoID:         domain.LeoID,
+	astro.VirgoID:       domain.VirgoID,
+	astro.LibraID:       domain.LibraID,
+	astro.ScorpioID:     domain.ScorpioID,
+	astro.SagittariusID: domain.SagittariusID,
+	astro.CapricornID:   domain.CapricornID,
+	astro.AquariusID:    domain.AquariusID,
+	astro.PiscesID:      domain.PiscesID,
+}
+
+var PlanetSetters = map[string]func(*domain.ProfileData, string){
+	astro.SunID:     func(pd *domain.ProfileData, s string) { pd.Sun = s },
+	astro.MoonID:    func(pd *domain.ProfileData, s string) { pd.Moon = s },
+	astro.MercuryID: func(pd *domain.ProfileData, s string) { pd.Mercury = s },
+	astro.VenusID:   func(pd *domain.ProfileData, s string) { pd.Venus = s },
+	astro.MarsID:    func(pd *domain.ProfileData, s string) { pd.Mars = s },
+	astro.JupiterID: func(pd *domain.ProfileData, s string) { pd.Jupiter = s },
+	astro.SaturnID:  func(pd *domain.ProfileData, s string) { pd.Saturn = s },
+	astro.UranusID:  func(pd *domain.ProfileData, s string) { pd.Uranus = s },
+	astro.NeptuneID: func(pd *domain.ProfileData, s string) { pd.Neptune = s },
+	astro.PlutoID:   func(pd *domain.ProfileData, s string) { pd.Pluto = s },
+}
+
+func natalDataToAstroProfile(data astro.NatalData) domain.ProfileData {
+	var profileData domain.ProfileData
+
+	for _, p := range data.Planets {
+		if setter, ok := PlanetSetters[p.ID]; ok {
+			setter(&profileData, ZodiacMapping[p.SignID])
+		}
+	}
+
+	return profileData
 }
 
 func (p *ProfileProcessor) markRetryOrFailed(ctx context.Context, requestID string, err error, worker string) {
@@ -449,28 +342,34 @@ func (p *ProfileProcessor) nextFailureStatus(ctx context.Context, requestID stri
 // RecommendProcessor обрабатывает сообщения astro.events.recommend.
 // Строит рекомендацию через Astro API + AlisaAI и пишет результат в requests_log.
 type RecommendProcessor struct {
+	astroRepo     AstroRepo
 	userRepo      user.Repository
+	productRepo   products.Repository
+	crmClient     CrmClient
 	requestsRepo  requests.Repository
 	rulesRepo     RuleMatcher
-	aiClient      alisa.Generator
 	astroProvider AstroProvider
 	logger        *zap.Logger
 }
 
 func NewRecommendProcessor(
+	astroRepo AstroRepo,
 	userRepo user.Repository,
+	productRepo products.Repository,
 	requestsRepo requests.Repository,
 	rulesRepo RuleMatcher,
-	aiClient alisa.Generator,
 	astroProvider AstroProvider,
+	crmClient CrmClient,
 	logger *zap.Logger,
 ) *RecommendProcessor {
 	return &RecommendProcessor{
+		astroRepo:     astroRepo,
 		userRepo:      userRepo,
+		productRepo:   productRepo,
 		requestsRepo:  requestsRepo,
 		rulesRepo:     rulesRepo,
-		aiClient:      aiClient,
 		astroProvider: astroProvider,
+		crmClient:     crmClient,
 		logger:        logger,
 	}
 }
@@ -530,18 +429,81 @@ func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
 		return nil
 	}
 
-	result, err := buildRecommendation(tctx, msg.Recommend, p.userRepo, p.rulesRepo, p.aiClient, p.astroProvider, p.logger)
-	if err != nil {
-		span.RecordError(err)
-		p.markRetryOrFailed(tctx, msg.RequestID, err, "recommend")
-		return fmt.Errorf("recommend processing failed: %w", err)
+	if p.astroProvider == nil {
+		err := errors.New("astro provider is not configured")
+		return err
 	}
 
-	resultJSON, err := json.Marshal(result)
+	u, err := p.userRepo.Get(ctx, msg.Recommend.UserID)
+	if err != nil {
+		return err
+	}
+
+	// Create a hash from UserID and BirthDate fields for storage
+	hash := ProfileHash(u.UserID, u.BirthDate)
+	astroProfile, err := p.astroRepo.ExecuteReceivingByHash(tctx, hash)
+	// в пользователе не хранится место рождения, поэтому рассчитать заново не получится
+	// TODOЖ обработать ошибку errors.Is(usecases.ErrNotFound, err) отдельно, чтобы сообщить пользователю
+	if err != nil {
+		astrologger.Error(tctx, "errror fetching astro profile from storage",
+			zap.String("request_id", msg.RequestID),
+			zap.String("user_id", u.UserID))
+		span.RecordError(err)
+		p.markRetryOrFailed(tctx, msg.RequestID, err, "recommend")
+		return err
+	}
+
+	astrologger.Info(tctx, "astro profile got from storage",
+		zap.String("request_id", msg.RequestID),
+		zap.String("user_id", u.UserID))
+
+	scen := msg.Recommend.Scenario
+	gen := msg.Recommend.Gender
+	pref := msg.Recommend.Preferences
+	planets := astroProfile.ProfileData
+
+	triggers := buildTriggers(planets)
+	tags, err := p.rulesRepo.Match(ctx, triggers)
+	if err != nil {
+		astrologger.Error(tctx, "error match rules",
+			zap.String("request_id", msg.RequestID),
+			zap.String("user_id", u.UserID))
+		span.RecordError(err)
+		p.markRetryOrFailed(tctx, msg.RequestID, err, "recommend")
+
+		return fmt.Errorf("error match rules: %w", err)
+	}
+
+	prods, err := p.productRepo.Recommend(ctx, tags, gen, scen, pref)
+	if err != nil {
+
+		astrologger.Error(tctx, "error search products",
+			zap.String("request_id", msg.RequestID),
+			zap.String("user_id", u.UserID))
+		span.RecordError(err)
+		p.markRetryOrFailed(tctx, msg.RequestID, err, "recommend")
+
+		return fmt.Errorf("error search products: %w", err)
+
+	}
+
+	resp := RecommendationResult{
+		RequestID: msg.RequestID,
+		Recommend: prods,
+	}
+
+	resultJSON, err := json.Marshal(resp)
 	if err != nil {
 		span.RecordError(err)
 		p.markRetryOrFailed(tctx, msg.RequestID, err, "recommend")
 		return fmt.Errorf("marshal recommendation: %w", err)
+	}
+
+	err = p.crmClient.SendRecommend(ctx, string(resultJSON))
+	if err != nil {
+		span.RecordError(err)
+		p.markRetryOrFailed(tctx, msg.RequestID, err, "recommend")
+		return fmt.Errorf("send to crm recommend error: %w", err)
 	}
 
 	if err := p.requestsRepo.UpdateStatus(tctx, msg.RequestID, requests.StatusCompleted, resultJSON, ""); err != nil {
@@ -554,4 +516,37 @@ func (p *RecommendProcessor) Handle(ctx context.Context, message []byte) error {
 		zap.String("request_id", msg.RequestID),
 		zap.String("user_id", msg.Recommend.UserID))
 	return nil
+}
+
+func buildTriggers(planets domain.ProfileData) []string {
+	var triggers []string
+	planetMap := map[string]string{
+		domain.Sun:     planets.Sun,
+		domain.Moon:    planets.Moon,
+		domain.Venus:   planets.Venus,
+		domain.Mars:    planets.Mars,
+		domain.Jupiter: planets.Jupiter,
+		domain.Saturn:  planets.Saturn,
+		domain.Mercury: planets.Mercury,
+		domain.Neptune: planets.Neptune,
+		domain.Uranus:  planets.Uranus,
+		domain.Pluto:   planets.Pluto,
+	}
+
+	for planet, sign := range planetMap {
+		if sign != "" {
+			triggers = append(triggers, fmt.Sprintf(`{"sign": %q, "planet": %q}`, sign, planet))
+		}
+	}
+	return triggers
+}
+
+func ProfileHash(userID, birthDate string) string {
+	// Create a hash from UserID and BirthDate fields for storage
+	var hashInput strings.Builder
+	hashInput.WriteString(userID)
+	hashInput.WriteString(birthDate)
+
+	hash := sha256.Sum256([]byte(hashInput.String()))
+	return hex.EncodeToString(hash[:])
 }

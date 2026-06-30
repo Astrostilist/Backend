@@ -10,6 +10,12 @@ import (
 
 var ErrNotFound = errors.New("item not found")
 
+//go:generate mockgen -source=astro_profile.go -destination=mocks/mock_astro_profile.go -package=mocks
+type ProcessAstroProfileInterface interface {
+	ExecuteSave(ctx context.Context, profile domain.AstroProfile) error
+	ExecuteReceivingByHash(ctx context.Context, hash string) (*domain.AstroProfile, error)
+}
+
 type ProcessAstroProfileUseCase struct {
 	dbRepo    repositories.AstroProfileRepository
 	cacheRepo repositories.AstroProfileRepository
