@@ -16,25 +16,22 @@ func setupUserRepoMock(t *testing.T) (sqlmock.Sqlmock, UserRepository, func()) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 
-    cleanup := func() {
-	    mock.ExpectClose()
-	    require.NoError(t, db.Close())
-	    require.NoError(t, mock.ExpectationsWereMet())
-    }
+	cleanup := func() {
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+		require.NoError(t, mock.ExpectationsWereMet())
+	}
 
 	return mock, NewUserRepository(db), cleanup
 }
 
 func expectRelatedUserDeletes(mock sqlmock.Sqlmock, userID string) {
-	mock.ExpectExec(regexp.QuoteMeta(queryDeleteFromUserConsents)).
+	mock.ExpectExec(regexp.QuoteMeta(queryDeleteFromRequestsLog)).
 		WithArgs(userID).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(queryDeleteFromGenerationResults)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(queryDeleteFromAstroProfiles)).
 		WithArgs(userID).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(queryDeleteFromFeedback)).
-		WithArgs(userID).
-		WillReturnResult(sqlmock.NewResult(0, 0))
+		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
 // успешное удаление
@@ -73,21 +70,15 @@ func TestDeleteUser_NotFound(t *testing.T) {
 	require.False(t, found)
 }
 
-// rollback при ошибке удаления связанных данных
+// rollback при ошибке удаления requests_log
 func TestDeleteUser_RollbackOnError(t *testing.T) {
 	mock, repo, cleanup := setupUserRepoMock(t)
 	defer cleanup()
 	userID := "user-123"
-	expectedErr := errors.New("delete feedback failed")
+	expectedErr := errors.New("delete requests_log failed")
 
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta(queryDeleteFromUserConsents)).
-		WithArgs(userID).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(queryDeleteFromGenerationResults)).
-		WithArgs(userID).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(queryDeleteFromFeedback)).
+	mock.ExpectExec(regexp.QuoteMeta(queryDeleteFromRequestsLog)).
 		WithArgs(userID).
 		WillReturnError(expectedErr)
 	mock.ExpectRollback()

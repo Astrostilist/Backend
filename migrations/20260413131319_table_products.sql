@@ -40,8 +40,6 @@ ALTER TABLE products DROP CONSTRAINT IF EXISTS chk_ext_product_id;
 ALTER TABLE products DROP CONSTRAINT IF EXISTS chk_title;
 ALTER TABLE products DROP CONSTRAINT IF EXISTS chk_price;
 ALTER TABLE products DROP CONSTRAINT IF EXISTS chk_url_is_http_s;
-ALTER TABLE products DROP CONSTRAINT IF EXISTS chk_images_urls;
-
 DROP FUNCTION IF EXISTS update_updated_at_column();
 
 DROP INDEX IF EXISTS  idx_products_tags;

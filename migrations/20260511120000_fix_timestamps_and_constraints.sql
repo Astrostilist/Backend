@@ -33,10 +33,6 @@ ALTER TABLE requests_log
     DROP CONSTRAINT IF EXISTS chk_requests_log_status,
     DROP CONSTRAINT IF EXISTS chk_requests_log_scenario;
 
-ALTER TABLE products
-    ALTER COLUMN created_at TYPE TIMESTAMP USING created_at AT TIME ZONE 'UTC',
-    ALTER COLUMN updated_at TYPE TIMESTAMP USING updated_at AT TIME ZONE 'UTC';
-
 ALTER TABLE astro_rules
     ALTER COLUMN created_at TYPE TIMESTAMP USING created_at AT TIME ZONE 'UTC',
     ALTER COLUMN updated_at TYPE TIMESTAMP USING updated_at AT TIME ZONE 'UTC';
