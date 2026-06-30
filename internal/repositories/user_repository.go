@@ -7,9 +7,8 @@ import (
 )
 
 const queryDeleteFromUsers = `DELETE FROM users WHERE user_id = $1`
-const queryDeleteFromUserConsents = `DELETE FROM user_consents WHERE user_id = $1`
-const queryDeleteFromGenerationResults = `DELETE FROM generation_results WHERE user_id = $1`
-const queryDeleteFromFeedback = `DELETE FROM feedback WHERE user_id = $1`
+const queryDeleteFromRequestsLog = `DELETE FROM requests_log WHERE user_id = $1`
+const queryDeleteFromAstroProfiles = `DELETE FROM astro_profiles WHERE user_id = $1`
 
 type UserRepository interface {
 	DeleteUsers(ctx context.Context, userID string) (found bool, err error)
@@ -29,7 +28,7 @@ func (t *userRepo) DeleteUsers(ctx context.Context, userID string) (bool, error)
 		return false, err
 	}
 
-	deleteQueries := []string{queryDeleteFromUserConsents, queryDeleteFromGenerationResults, queryDeleteFromFeedback}
+	deleteQueries := []string{queryDeleteFromRequestsLog, queryDeleteFromAstroProfiles}
 	for _, query := range deleteQueries {
 		if _, err := tx.ExecContext(ctx, query, userID); err != nil {
 			_ = tx.Rollback()

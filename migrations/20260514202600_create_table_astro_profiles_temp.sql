@@ -1,7 +1,7 @@
 -- +goose Up
 CREATE TABLE astro_profiles_temp (
     id UUID PRIMARY KEY,
-    user_id UUID NOT NULL UNIQUE,
+    user_id VARCHAR(255) NOT NULL UNIQUE,
     profile JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
